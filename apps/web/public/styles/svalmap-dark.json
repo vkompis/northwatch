@@ -1,37 +1,31 @@
 {
   "version": 8,
-  "name": "SvalMap Dark (nyheterDarkmode_07.4.6)",
+  "name": "SvalMap Dark (OpenFreeMap)",
   "metadata": {
     "maputnik:renderer": "mlgljs",
-    "svalmap:source": "Downloads/nyheterdarkmode_0746.json",
+    "svalmap:design": "SvalMap dark design (NRK nyheter darkmode as inspiration only)",
+    "svalmap:data": "OpenFreeMap / OpenMapTiles schema — no NRK sources",
     "svalmap:labels-minzoom": 4,
-    "svalmap:ice-rock-sand-source": "OSM-0-6 (was YR-baseData; invisible below z7)",
-    "svalmap:forests": "visible at all zoom (Maputnik default)"
+    "svalmap:hillshade": "AWS terrarium DEM, styled like the NRK vector hillshade (shadow only, fades out by z11)"
   },
   "sources": {
-    "YR-baseData": {
+    "openmaptiles": {
       "type": "vector",
-      "url": "https://kart.nrk.no/data/planet_v1.json"
+      "url": "https://tiles.openfreemap.org/planet",
+      "attribution": "<a href=\"https://openfreemap.org\" target=\"_blank\">OpenFreeMap</a> <a href=\"https://www.openmaptiles.org/\" target=\"_blank\">&copy; OpenMapTiles</a> Data from <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\">OpenStreetMap</a>"
     },
-    "OSM-country": {
-      "type": "geojson",
-      "data": "https://kart.nrk.no/static/extra/land_navn2.json"
-    },
-    "OSM-0-6": {
-      "type": "vector",
-      "url": "https://kart.nrk.no/data/nrk-osmdata.json"
-    },
-    "hillshade": {
-      "type": "vector",
-      "url": "https://kart.nrk.no/data/hillshade_world_v1_z01-12.json"
-    },
-    "nrkBorders": {
-      "type": "vector",
-      "url": "https://kart.nrk.no/data/boundary2024.json"
+    "terrain": {
+      "type": "raster-dem",
+      "tiles": [
+        "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+      ],
+      "encoding": "terrarium",
+      "tileSize": 256,
+      "maxzoom": 12,
+      "attribution": "Terrain: <a href=\"https://registry.opendata.aws/terrain-tiles/\" target=\"_blank\">Mapzen / AWS Terrain Tiles</a>"
     }
   },
-  "sprite": "https://kart.nrk.no/sprites/tst",
-  "glyphs": "https://kart.nrk.no/fonts/{fontstack}/{range}.pbf",
+  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "background",
@@ -43,7 +37,7 @@
     {
       "id": "airport-aerodome",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "aeroway",
       "filter": [
         "all",
@@ -83,7 +77,7 @@
     {
       "id": "landuse-grey",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landuse",
       "filter": [
         "all",
@@ -118,7 +112,7 @@
     {
       "id": "landuse-green",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landuse",
       "filter": [
         "all",
@@ -154,7 +148,7 @@
     {
       "id": "landcover-greens-osm",
       "type": "fill",
-      "source": "OSM-0-6",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "maxzoom": 7,
       "filter": [
@@ -191,7 +185,7 @@
     {
       "id": "landcover-greens-yr",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "minzoom": 7,
       "filter": [
@@ -228,7 +222,7 @@
     {
       "id": "landcover-woods-osm",
       "type": "fill",
-      "source": "OSM-0-6",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "maxzoom": 7,
       "filter": [
@@ -246,7 +240,7 @@
     {
       "id": "landcover-woods-yr",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "minzoom": 7,
       "filter": [
@@ -264,7 +258,7 @@
     {
       "id": "landcover-ice-osm",
       "type": "fill",
-      "source": "OSM-0-6",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "maxzoom": 7,
       "filter": [
@@ -282,7 +276,7 @@
     {
       "id": "landcover-ice-yr",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "minzoom": 7,
       "filter": [
@@ -300,7 +294,7 @@
     {
       "id": "landcover-rock-osm",
       "type": "fill",
-      "source": "OSM-0-6",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "maxzoom": 7,
       "filter": [
@@ -318,7 +312,7 @@
     {
       "id": "landcover-rock-yr",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "minzoom": 7,
       "filter": [
@@ -336,7 +330,7 @@
     {
       "id": "landcover-sand-osm",
       "type": "fill",
-      "source": "OSM-0-6",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "maxzoom": 7,
       "filter": [
@@ -354,7 +348,7 @@
     {
       "id": "landcover-sand-yr",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "landcover",
       "minzoom": 7,
       "filter": [
@@ -370,78 +364,31 @@
       }
     },
     {
-      "id": "hillshade-150",
-      "type": "fill",
-      "source": "hillshade",
-      "source-layer": "layer_150",
+      "id": "hillshade-land",
+      "type": "hillshade",
+      "source": "terrain",
       "minzoom": 1,
       "maxzoom": 11,
-      "layout": {},
+      "layout": {
+        "visibility": "visible"
+      },
       "paint": {
-        "fill-color": "#061629",
-        "fill-opacity": [
+        "hillshade-shadow-color": "rgba(6, 22, 41, 0.85)",
+        "hillshade-highlight-color": "rgba(0, 0, 0, 0)",
+        "hillshade-accent-color": "rgba(6, 22, 41, 0.25)",
+        "hillshade-illumination-direction": 315,
+        "hillshade-exaggeration": [
           "interpolate",
           [
-            "exponential",
-            1
+            "linear"
           ],
           [
             "zoom"
           ],
+          1,
+          0.35,
           7,
-          0.1,
-          11,
-          0
-        ]
-      }
-    },
-    {
-      "id": "hillshade-100",
-      "type": "fill",
-      "source": "hillshade",
-      "source-layer": "layer_100",
-      "minzoom": 1,
-      "maxzoom": 11,
-      "layout": {},
-      "paint": {
-        "fill-color": "#061629",
-        "fill-opacity": [
-          "interpolate",
-          [
-            "exponential",
-            1
-          ],
-          [
-            "zoom"
-          ],
-          7,
-          0.08,
-          11,
-          0
-        ]
-      }
-    },
-    {
-      "id": "hillshade-50",
-      "type": "fill",
-      "source": "hillshade",
-      "source-layer": "layer_50",
-      "minzoom": 1,
-      "maxzoom": 11,
-      "layout": {},
-      "paint": {
-        "fill-color": "#061629",
-        "fill-opacity": [
-          "interpolate",
-          [
-            "exponential",
-            1
-          ],
-          [
-            "zoom"
-          ],
-          7,
-          0.1,
+          0.3,
           11,
           0
         ]
@@ -450,7 +397,7 @@
     {
       "id": "water-fill-shadow",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "water",
       "paint": {
         "fill-opacity": [
@@ -499,7 +446,7 @@
     {
       "id": "water-line-shadow",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "waterway",
       "minzoom": 8,
       "layout": {
@@ -578,7 +525,7 @@
     {
       "id": "water-fill",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "water",
       "paint": {
         "fill-color": "#061629"
@@ -587,7 +534,7 @@
     {
       "id": "water-line",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "waterway",
       "minzoom": 8,
       "layout": {
@@ -666,7 +613,7 @@
     {
       "id": "pier",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -694,7 +641,7 @@
     {
       "id": "rail-overview",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 0,
       "maxzoom": 24,
@@ -718,7 +665,7 @@
     {
       "id": "road-pedestrian-fill",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -766,7 +713,7 @@
     {
       "id": "road-private-tunnel",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 13,
       "filter": [
@@ -853,7 +800,7 @@
     {
       "id": "road-residential-tunnel",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 12,
       "filter": [
@@ -938,7 +885,7 @@
     {
       "id": "road-intercity-tertiary-tunnel",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 13,
       "filter": [
@@ -1061,7 +1008,7 @@
     {
       "id": "road-intercity-secondary-tunnel",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 13,
       "filter": [
@@ -1184,7 +1131,7 @@
     {
       "id": "road-intercity-primary-tunnel",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 13,
       "filter": [
@@ -1307,7 +1254,7 @@
     {
       "id": "road-interstate-tunnel",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -1403,7 +1350,7 @@
     {
       "id": "road-pedestrian-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 6,
       "filter": [
@@ -1474,7 +1421,7 @@
     {
       "id": "rail-detailed",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 13,
       "filter": [
@@ -1538,7 +1485,7 @@
     {
       "id": "road-private-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 12,
       "filter": [
@@ -1619,7 +1566,7 @@
     {
       "id": "road-residential-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 12,
       "filter": [
@@ -1723,7 +1670,7 @@
     {
       "id": "road-intercity-tertiary-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 7,
       "filter": [
@@ -1833,7 +1780,7 @@
     {
       "id": "road-intercity-secondary-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 9,
       "filter": [
@@ -1943,7 +1890,7 @@
     {
       "id": "road-intercity-primary-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 7,
       "filter": [
@@ -2053,7 +2000,7 @@
     {
       "id": "road-interstate-ground",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -2161,7 +2108,7 @@
     {
       "id": "road-private-fill",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -2231,7 +2178,7 @@
     {
       "id": "road-residential-fill",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -2298,7 +2245,7 @@
     {
       "id": "road-intercity-tertiary-fill",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 7,
       "filter": [
@@ -2350,7 +2297,7 @@
     {
       "id": "road-intercity-secondary-fill",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 9,
       "filter": [
@@ -2402,7 +2349,7 @@
     {
       "id": "road-intercity-primary-fill",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "minzoom": 7,
       "filter": [
@@ -2454,7 +2401,7 @@
     {
       "id": "road-interstate-fill",
       "type": "line",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation",
       "filter": [
         "all",
@@ -2530,7 +2477,7 @@
     {
       "id": "building",
       "type": "fill",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "building",
       "paint": {
         "fill-opacity": [
@@ -2553,19 +2500,30 @@
     {
       "id": "border-region",
       "type": "line",
-      "source": "nrkBorders",
-      "source-layer": "regional",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
       "filter": [
-        "match",
+        "all",
         [
-          "get",
-          "maritime"
+          "==",
+          [
+            "get",
+            "admin_level"
+          ],
+          4
         ],
         [
-          0
-        ],
-        true,
-        false
+          "match",
+          [
+            "get",
+            "maritime"
+          ],
+          [
+            0
+          ],
+          true,
+          false
+        ]
       ],
       "layout": {
         "line-join": "round",
@@ -2608,30 +2566,41 @@
     {
       "id": "border-country",
       "type": "line",
-      "source": "nrkBorders",
-      "source-layer": "national",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
       "filter": [
         "all",
-        [
-          "match",
-          [
-            "get",
-            "maritime"
-          ],
-          [
-            0,
-            1
-          ],
-          true,
-          false
-        ],
         [
           "==",
           [
             "get",
-            "disputed"
+            "admin_level"
           ],
-          0
+          2
+        ],
+        [
+          "all",
+          [
+            "match",
+            [
+              "get",
+              "maritime"
+            ],
+            [
+              0,
+              1
+            ],
+            true,
+            false
+          ],
+          [
+            "==",
+            [
+              "get",
+              "disputed"
+            ],
+            0
+          ]
         ]
       ],
       "layout": {
@@ -2658,30 +2627,41 @@
     {
       "id": "border-country_disputed",
       "type": "line",
-      "source": "nrkBorders",
-      "source-layer": "national",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
       "filter": [
         "all",
-        [
-          "match",
-          [
-            "get",
-            "maritime"
-          ],
-          [
-            0,
-            1
-          ],
-          true,
-          false
-        ],
         [
           "==",
           [
             "get",
-            "disputed"
+            "admin_level"
           ],
-          1
+          2
+        ],
+        [
+          "all",
+          [
+            "match",
+            [
+              "get",
+              "maritime"
+            ],
+            [
+              0,
+              1
+            ],
+            true,
+            false
+          ],
+          [
+            "==",
+            [
+              "get",
+              "disputed"
+            ],
+            1
+          ]
         ]
       ],
       "layout": {
@@ -2712,7 +2692,7 @@
     {
       "id": "label-suburbs",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "place",
       "minzoom": 11,
       "filter": [
@@ -2725,32 +2705,18 @@
       ],
       "layout": {
         "text-field": [
-          "match",
+          "coalesce",
           [
             "get",
-            "iso_3166_1"
+            "name:no"
           ],
           [
-            "NO"
-          ],
-          [
-            "to-string",
-            [
-              "get",
-              "name"
-            ]
-          ],
-          [
-            "to-string",
-            [
-              "get",
-              "name_en"
-            ]
+            "get",
+            "name"
           ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-size": 13,
         "text-letter-spacing": 0.08,
@@ -2767,7 +2733,7 @@
     {
       "id": "label-islands",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "place",
       "maxzoom": 16,
       "filter": [
@@ -2810,8 +2776,7 @@
           ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-size": [
           "interpolate",
@@ -2842,7 +2807,7 @@
     {
       "id": "label-waterway-rivers",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "waterway",
       "minzoom": 13,
       "filter": [
@@ -2857,8 +2822,7 @@
       ],
       "layout": {
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-max-angle": 30,
         "symbol-spacing": [
@@ -2913,7 +2877,7 @@
     {
       "id": "label-water-fill-line",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "water_name",
       "filter": [
         "==",
@@ -2959,8 +2923,7 @@
           0
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "symbol-placement": "line-center",
         "text-pitch-alignment": "viewport",
@@ -2991,7 +2954,7 @@
     {
       "id": "label-water-fill-point",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "water_name",
       "filter": [
         "==",
@@ -3019,8 +2982,7 @@
           10
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-field": [
           "match",
@@ -3037,8 +2999,19 @@
           "english",
           "norsk",
           [
-            "get",
-            "name:no"
+            "coalesce",
+            [
+              "get",
+              "name:no"
+            ],
+            [
+              "get",
+              "name_int"
+            ],
+            [
+              "get",
+              "name"
+            ]
           ]
         ],
         "text-letter-spacing": [
@@ -3125,7 +3098,7 @@
     {
       "id": "label-road-interstate",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation_name",
       "minzoom": 12,
       "filter": [
@@ -3159,8 +3132,7 @@
         "text-max-angle": 30,
         "symbol-spacing": 400,
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "symbol-placement": "line",
         "text-padding": 10,
@@ -3181,7 +3153,7 @@
     {
       "id": "label-road-intercity",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation_name",
       "minzoom": 13,
       "filter": [
@@ -3226,8 +3198,7 @@
         "text-max-angle": 30,
         "symbol-spacing": 500,
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "symbol-placement": "line",
         "text-padding": 10,
@@ -3248,7 +3219,7 @@
     {
       "id": "label-road-residential",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "transportation_name",
       "minzoom": 15,
       "filter": [
@@ -3277,8 +3248,7 @@
         "text-max-angle": 30,
         "symbol-spacing": 500,
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "symbol-placement": "line",
         "text-padding": 10,
@@ -3296,7 +3266,7 @@
     {
       "id": "label-airport",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "aerodrome_label",
       "minzoom": 10,
       "filter": [
@@ -3307,8 +3277,7 @@
         "text-line-height": 1.1,
         "text-size": 18,
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-field": [
           "coalesce",
@@ -3342,7 +3311,7 @@
     {
       "id": "label-settlement-village",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "place",
       "minzoom": 11,
       "maxzoom": 15,
@@ -3400,8 +3369,7 @@
           ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-field": [
           "coalesce",
@@ -3434,7 +3402,7 @@
     {
       "id": "label-settlement-town",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "place",
       "minzoom": 6,
       "maxzoom": 12,
@@ -3467,8 +3435,7 @@
           ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-size": [
           "interpolate",
@@ -3524,7 +3491,7 @@
     {
       "id": "label-settlement-city",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "place",
       "minzoom": 4,
       "maxzoom": 12,
@@ -3566,8 +3533,7 @@
           ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-size": [
           "interpolate",
@@ -3623,7 +3589,7 @@
     {
       "id": "label-capitals",
       "type": "symbol",
-      "source": "YR-baseData",
+      "source": "openmaptiles",
       "source-layer": "place",
       "minzoom": 4,
       "maxzoom": 12,
@@ -3660,8 +3626,7 @@
           ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-size": [
           "interpolate",
@@ -3689,32 +3654,38 @@
     {
       "id": "label-country-names",
       "type": "symbol",
-      "source": "OSM-country",
-      "source-layer": "",
+      "source": "openmaptiles",
+      "source-layer": "place",
       "minzoom": 4,
       "maxzoom": 8,
       "layout": {
         "text-field": [
-          "get",
-          "name:no"
+          "coalesce",
+          [
+            "get",
+            "name:no"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
         ],
         "text-font": [
-          "NRK Sans Medium",
-          "Arial Unicode MS Regular"
+          "Noto Sans Bold"
         ],
         "text-padding": 10,
         "text-allow-overlap": false,
         "symbol-sort-key": [
-          "/",
-          1,
+          "coalesce",
           [
-            "to-number",
-            [
-              "get",
-              "population"
-            ],
-            1
-          ]
+            "get",
+            "rank"
+          ],
+          99
         ],
         "text-transform": "uppercase",
         "text-max-width": 6,
@@ -3738,13 +3709,20 @@
         "text-halo-color": "#243952",
         "text-halo-width": 1,
         "text-halo-blur": 1
-      }
+      },
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "country"
+      ]
     }
   ],
   "created": "2024-09-04 13:00:00",
   "modified": "2024-05-14 14:30:00",
-  "id": "ckg1z301u088k19mkg5vgnqyz",
-  "owner": "nrk",
+  "owner": "svalmap",
   "visibility": "private",
   "protected": false,
   "draft": true

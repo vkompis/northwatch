@@ -8,6 +8,7 @@ import {
   mmsiCategory,
   mmsiFlagCountry,
   countryInfoFromMmsi,
+  isLikelyAisDevice,
   HEADER_COLORS,
   type VesselCategory,
   type FlagCountry,
@@ -20,6 +21,8 @@ import {
 import { resolveShipClass } from '../utils/shipClass';
 import { buildVesselHoverHtml } from '../utils/vesselHover';
 import { buildProjectionRingFeatures } from '../utils/projectionRings';
+import { mapStyleReady } from '../utils/mapSafe';
+import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 
 export type VesselFeatureProps = {
   mmsi: string;
@@ -210,10 +213,19 @@ function toFeature(v: any) {
   const shipType = v.shipType ?? null;
   const imo =
     v.imo != null && v.imo !== '' ? String(v.imo) : null;
-  const category = mmsiCategory(mmsi, shipType, imo);
+  const name = v.vessel_name || v.name || '';
+  const sanctioned = v.sanctioned === true || v.sanctioned === 1;
+  const shadowfleet = v.shadowfleet === true || v.shadowfleet === 1;
+  const category = mmsiCategory(mmsi, shipType, imo, v.military);
   const flagCountry = mmsiFlagCountry(mmsi);
   const country = countryInfoFromMmsi(mmsi);
-  const shipClass = resolveShipClass(shipType, v.shipTypeCode ?? null);
+  // Never bucket vessels of interest as buoys, even with odd MMSIs
+  const ofInterest =
+    sanctioned || shadowfleet || category === 'military' || category === 'research';
+  const shipClass =
+    !ofInterest && isLikelyAisDevice({ mmsi, imo, name })
+      ? 'device'
+      : resolveShipClass(shipType, v.shipTypeCode ?? null);
   const headingRaw = v.heading ?? v.course ?? null;
   const heading =
     headingRaw == null || headingRaw === '' || Number(headingRaw) === 511
@@ -222,8 +234,8 @@ function toFeature(v: any) {
 
   const props: VesselFeatureProps = {
     mmsi,
-    name: v.vessel_name || v.name || '',
-    label: v.vessel_name || v.name || `MMSI ${mmsi}`,
+    name,
+    label: name || `MMSI ${mmsi}`,
     category,
     flagCountry,
     shipClass,
@@ -237,9 +249,9 @@ function toFeature(v: any) {
     eta: v.eta || null,
     timestamp: v.timestamp || null,
     source: v.source != null && v.source !== '' ? String(v.source) : null,
-    sanctioned: v.sanctioned === true ? 1 : 0,
-    shadowfleet: v.shadowfleet === true ? 1 : 0,
-    military: category === 'military' || v.military === true ? 1 : 0,
+    sanctioned: sanctioned ? 1 : 0,
+    shadowfleet: shadowfleet ? 1 : 0,
+    military: category === 'military' ? 1 : 0,
     research: category === 'research' ? 1 : 0,
     country: country.name,
     flag: country.iso,
@@ -252,6 +264,32 @@ function toFeature(v: any) {
     geometry: { type: 'Point' as const, coordinates: [lon, lat] },
     properties: props,
   };
+}
+
+/**
+ * The hit layer is much larger than the dots, so several ships can sit under the
+ * cursor. Pick the one whose marker is closest to the pointer instead of whatever
+ * MapLibre happens to return first.
+ */
+function nearestFeature(
+  map: { project: (lngLat: [number, number]) => { x: number; y: number } },
+  features: any[] | undefined,
+  point: { x: number; y: number }
+): any | null {
+  if (!features?.length) return null;
+  let best: any = null;
+  let bestD = Infinity;
+  for (const f of features) {
+    const c = f?.geometry?.coordinates;
+    if (!Array.isArray(c) || c.length < 2) continue;
+    const p = map.project([Number(c[0]), Number(c[1])]);
+    const d = (p.x - point.x) ** 2 + (p.y - point.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = f;
+    }
+  }
+  return best ?? features[0];
 }
 
 /**
@@ -308,6 +346,11 @@ export default function VesselLayer({
   selectedMmsiRef.current = selectedMmsi;
   const applyFilterRef = useRef<(() => void) | null>(null);
   const allFeaturesRef = useRef<any[]>([]);
+  /** MMSI the camera last flew to — deep links resolve before the vessel list arrives. */
+  const flownToRef = useRef<string | null>(null);
+  const flyToVesselRef = useRef<((mmsi: string) => void) | null>(null);
+  const flyToSelectedRef = useRef(flyToSelected);
+  flyToSelectedRef.current = flyToSelected;
 
   useEffect(() => {
     const sourceId = 'ships';
@@ -579,7 +622,7 @@ export default function VesselLayer({
             'symbol-spacing': 280,
             'text-field': ['get', 'label'],
             'text-size': 11,
-            'text-font': ['NRK Sans Regular', 'Open Sans Regular', 'Arial Unicode MS Regular'],
+            'text-font': MAP_FONT_REGULAR,
             'text-max-angle': 30,
             'text-pitch-alignment': 'viewport',
             'text-rotation-alignment': 'map',
@@ -667,6 +710,22 @@ export default function VesselLayer({
       }
     }
     showProjectionRef.current = showProjection;
+    flyToVesselRef.current = flyToVessel;
+
+    /** Centre on the selected vessel once per selection, as soon as its position is known. */
+    function flyToVessel(mmsi: string) {
+      if (!flyToSelectedRef.current || flownToRef.current === mmsi) return;
+      const v = vesselsByMmsiRef.current.get(mmsi);
+      if (v?.lon == null || v?.lat == null || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) {
+        return;
+      }
+      flownToRef.current = mmsi;
+      try {
+        map.flyTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), 7.5), speed: 1.2 });
+      } catch {
+        /* ignore */
+      }
+    }
 
     function ensureTrackLayers() {
       if (!map.getSource(trackSourceId)) {
@@ -810,7 +869,7 @@ export default function VesselLayer({
         map.setPaintProperty('vessels-triangle', 'icon-opacity', triangleOpacity);
       }
       if (map.getLayer('vessels-label')) {
-        map.setLayoutProperty('vessels-label', 'text-font', ['NRK Sans Medium']);
+        map.setLayoutProperty('vessels-label', 'text-font', MAP_FONT_BOLD);
         map.setLayoutProperty('vessels-label', 'text-size', 12);
         map.setLayoutProperty('vessels-label', 'text-allow-overlap', true);
         map.setLayoutProperty('vessels-label', 'text-ignore-placement', true);
@@ -913,7 +972,7 @@ export default function VesselLayer({
           minzoom: 7.5,
           layout: {
             'text-field': ['coalesce', ['get', 'name'], ['get', 'label']],
-            'text-font': ['NRK Sans Medium'],
+            'text-font': MAP_FONT_BOLD,
             'text-size': 12,
             'text-offset': [0, 1.35],
             'text-anchor': 'top',
@@ -994,7 +1053,7 @@ export default function VesselLayer({
       if (!clickHandler) {
         clickHandler = (e: any) => {
           if (!interactiveRef.current) return;
-          const f = e.features?.[0];
+          const f = nearestFeature(map, e.features, e.point);
           if (!f?.properties || !onSelectRef.current) return;
           e.originalEvent?.stopPropagation?.();
           hideHover();
@@ -1052,11 +1111,13 @@ export default function VesselLayer({
         hoverEnterHandler = (e: any) => {
           if (!interactiveRef.current) return;
           map.getCanvas().style.cursor = 'pointer';
-          if (e.features?.[0]) showHover(e.features[0]);
+          const f = nearestFeature(map, e.features, e.point);
+          if (f) showHover(f);
         };
         hoverMoveHandler = (e: any) => {
           if (!interactiveRef.current) return;
-          if (e.features?.[0]) showHover(e.features[0]);
+          const f = nearestFeature(map, e.features, e.point);
+          if (f) showHover(f);
         };
         hoverLeaveHandler = () => {
           map.getCanvas().style.cursor = '';
@@ -1114,7 +1175,11 @@ export default function VesselLayer({
       setLayersVisible(visibleRef.current);
     }
 
+    let refreshing = false;
     async function refresh() {
+      // load / idle / interval can overlap; a slow response must not overwrite a newer one
+      if (refreshing) return;
+      refreshing = true;
       try {
         await ensureLayers();
         if (destroyed) return;
@@ -1132,7 +1197,10 @@ export default function VesselLayer({
         onVesselsRef.current?.(Array.from(byMmsi.values()));
         applyFeatureFilter();
         const sel = selectedMmsiRef.current;
-        if (sel) showProjection(sel);
+        if (sel) {
+          showProjection(sel);
+          flyToVessel(sel);
+        }
         emitStatus({
           lastUpdate: new Date().toISOString(),
           error: null,
@@ -1142,6 +1210,8 @@ export default function VesselLayer({
         emitStatus({
           error: e?.message || 'AIS update failed',
         });
+      } finally {
+        refreshing = false;
       }
     }
 
@@ -1190,6 +1260,8 @@ export default function VesselLayer({
       if (bgClickHandler) {
         map.off('click', bgClickHandler);
       }
+      // MapContainer's cleanup runs first on unmount and has already called map.remove()
+      if (!mapStyleReady(map)) return;
       for (const id of [...layerIds].reverse()) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
@@ -1232,23 +1304,16 @@ export default function VesselLayer({
 
   useEffect(() => {
     if (!selectedMmsi) {
+      flownToRef.current = null;
       clearTrackRef.current?.();
       clearProjectionRef.current?.();
       return;
     }
     showTrackRef.current?.(selectedMmsi).catch(() => undefined);
     showProjectionRef.current?.(selectedMmsi);
-    if (flyToSelected) {
-      const v = vesselsByMmsiRef.current.get(selectedMmsi);
-      if (v?.lon != null && v?.lat != null && Number.isFinite(v.lon) && Number.isFinite(v.lat)) {
-        try {
-          map.flyTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), 7.5), speed: 1.2 });
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }, [selectedMmsi, trackDays, flyToSelected, map]);
+    // Unknown position yet (deep link before first refresh) → refresh() flies once it lands
+    flyToVesselRef.current?.(selectedMmsi);
+  }, [selectedMmsi, trackDays, map]);
 
   return null;
 }

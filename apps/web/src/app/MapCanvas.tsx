@@ -35,7 +35,9 @@ type Props = {
   drawingAoi?: boolean;
   draftRing?: number[][];
   alertPolygons?: { id: string; polygon: AlertPolygon; label?: string }[];
-  onDraftPoint?: (lon: number, lat: number) => void;
+  onDraftChange?: (ring: number[][]) => void;
+  onDrawFinish?: () => void;
+  onDrawCancel?: () => void;
   onVesselSelect?: (vessel: VesselFeatureProps) => void;
   onGfwEventSelect?: (event: GfwEventProps) => void;
   onCableSelect?: (cable: CableFeatureProps) => void;
@@ -62,7 +64,9 @@ export default function MapCanvas({
   drawingAoi = false,
   draftRing = [],
   alertPolygons = [],
-  onDraftPoint,
+  onDraftChange,
+  onDrawFinish,
+  onDrawCancel,
   onVesselSelect,
   onGfwEventSelect,
   onCableSelect,
@@ -116,7 +120,9 @@ export default function MapCanvas({
         active={drawingAoi}
         draftRing={draftRing}
         polygons={alertPolygons}
-        onMapClick={onDraftPoint}
+        onDraftChange={onDraftChange}
+        onFinish={onDrawFinish}
+        onCancel={onDrawCancel}
       />
     </MapContainer>
   );

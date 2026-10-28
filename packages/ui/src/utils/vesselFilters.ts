@@ -1,62 +1,46 @@
-/** Client-side visibility filters over live vessel Feature properties. */
+/**
+ * Client-side visibility filters over live vessel Feature properties.
+ *
+ * Three groups, combined with AND:
+ *  1. Category — one per vessel, identical to its marker colour
+ *     (research → military / law enforcement → flag).
+ *  2. Ship type — AIS type bucket. Applies to civilian categories only;
+ *     military and research vessels are controlled by their category alone.
+ *  3. Focus — optional. When any is on, the vessel must match at least one
+ *     (Russian flag, sanctioned, shadow fleet, watchlist).
+ * Plus a freshness toggle (updated within the last 6 hours).
+ */
 
-import {
-  SHIP_CLASS_KEYS,
-  type ShipClass,
-  resolveShipClass,
-} from './shipClass';
+import { SHIP_CLASS_KEYS, type ShipClass, resolveShipClass } from './shipClass';
+import { mmsiFlagCountry, type VesselCategory } from './vesselCategory';
 
-export type VesselFilterFlags = {
-  /**
-   * Country / flag categories — default ON (visible).
-   * Apply to civilian traffic only; military / research ignore these.
-   */
-  norway: boolean;
-  eu: boolean;
-  china: boolean;
-  rest: boolean;
-  russia: boolean;
-  /**
-   * Priority type overlays — default ON.
-   * When on, these vessels stay visible regardless of country toggles.
-   * When off, that type is hidden even if its flag country is on.
-   */
-  research: boolean;
-  military: boolean;
-  /**
-   * AIS ship-type buckets (NAIS Fartøytyper-style) — default ON.
-   * Applied in addition to country / priority filters.
-   */
-  fishing: boolean;
-  cargo: boolean;
-  tanker: boolean;
-  passenger: boolean;
-  pleasure: boolean;
-  hsc: boolean;
-  tugWork: boolean;
-  militaryAis: boolean;
-  other: boolean;
-  unknown: boolean;
-  /**
-   * Optional focus flags — default OFF (no extra restriction).
-   * When any are on, vessel must also match at least one.
-   */
-  sanctioned: boolean;
-  shadow: boolean;
-  /** When true, only vessels updated within the last 6 hours. */
-  recent6h: boolean;
-  /** When true, only watchlisted MMSIs. */
-  watchlistOnly: boolean;
-};
+export const CATEGORY_KEYS = [
+  'norway',
+  'eu',
+  'china',
+  'russia',
+  'rest',
+  'military',
+  'research',
+] as const satisfies readonly VesselCategory[];
+
+export const FOCUS_KEYS = ['russianFlag', 'sanctioned', 'shadow', 'watchlistOnly'] as const;
+
+export type VesselFilterFlags = Record<VesselCategory, boolean> &
+  Record<ShipClass, boolean> &
+  Record<(typeof FOCUS_KEYS)[number], boolean> & {
+    /** When true, only vessels updated within the last 6 hours. */
+    recent6h: boolean;
+  };
 
 export const DEFAULT_VESSEL_FILTERS: VesselFilterFlags = {
   norway: true,
   eu: true,
   china: true,
-  rest: true,
   russia: true,
-  research: true,
+  rest: true,
   military: true,
+  research: true,
   fishing: true,
   cargo: true,
   tanker: true,
@@ -64,282 +48,153 @@ export const DEFAULT_VESSEL_FILTERS: VesselFilterFlags = {
   pleasure: true,
   hsc: true,
   tugWork: true,
-  militaryAis: true,
   other: true,
   unknown: true,
+  // Fishing-gear buoys and beacons clutter the coast; opt in when needed
+  device: false,
+  russianFlag: false,
   sanctioned: false,
   shadow: false,
-  recent6h: false,
   watchlistOnly: false,
+  recent6h: false,
 };
 
-const COUNTRY_KEYS = ['norway', 'eu', 'china', 'rest', 'russia'] as const;
-const TYPE_KEYS = ['research', 'military'] as const;
+const ALL_KEYS = Object.keys(DEFAULT_VESSEL_FILTERS) as (keyof VesselFilterFlags)[];
 
 export type VesselFilterExtras = {
-  /** MMSIs on the user watchlist — required when watchlistOnly is on. */
+  /** MMSIs on the user watchlist — used by the watchlist focus. */
   watchlistMmsis?: ReadonlySet<string> | Iterable<string> | null;
   /** Override "now" for recent6h (tests). */
   nowMs?: number;
 };
 
-export function anyFilterActive(f: VesselFilterFlags): boolean {
-  for (const k of COUNTRY_KEYS) if (!f[k]) return true;
-  for (const k of TYPE_KEYS) if (!f[k]) return true;
-  for (const k of SHIP_CLASS_KEYS) if (!f[k]) return true;
-  if (f.sanctioned || f.shadow) return true;
-  if (f.recent6h || f.watchlistOnly) return true;
-  return false;
-}
-
-function resolveFlagCountry(v: {
-  flagCountry?: string;
-  category?: string;
-  mmsi?: string;
-}): string {
-  const fc = String(v.flagCountry || '');
-  if (
-    fc === 'norway' ||
-    fc === 'eu' ||
-    fc === 'china' ||
-    fc === 'rest' ||
-    fc === 'russia'
-  ) {
-    return fc;
-  }
-  const cat = String(v.category || '');
-  if (
-    cat === 'norway' ||
-    cat === 'eu' ||
-    cat === 'china' ||
-    cat === 'rest' ||
-    cat === 'russia'
-  ) {
-    return cat;
-  }
-  const mid = parseInt(String(v.mmsi || '').slice(0, 3), 10);
-  if ([257, 258, 259].includes(mid)) return 'norway';
-  if (mid === 273) return 'russia';
-  if (mid >= 412 && mid <= 419) return 'china';
-  return 'rest';
-}
-
-function isResearchVessel(v: {
-  category?: string;
-  research?: number | boolean;
-}): boolean {
-  const cat = String(v.category || '');
-  return cat === 'research' || v.research === 1 || v.research === true;
-}
-
-function isMilitaryVessel(v: {
-  category?: string;
+type FilterableVessel = {
+  sanctioned?: number | boolean;
+  shadowfleet?: number | boolean;
   military?: number | boolean;
-}): boolean {
-  const cat = String(v.category || '');
-  return cat === 'military' || v.military === 1 || v.military === true;
-}
-
-function countryVisible(flagCountry: string, f: VesselFilterFlags): boolean {
-  if (flagCountry === 'norway') return f.norway;
-  if (flagCountry === 'eu') return f.eu;
-  if (flagCountry === 'china') return f.china;
-  if (flagCountry === 'russia') return f.russia;
-  return f.rest;
-}
-
-function resolveClass(v: {
+  research?: number | boolean;
+  category?: string;
+  flagCountry?: string;
+  mmsi?: string;
   shipClass?: string;
   shipType?: string | number | null;
   shipTypeCode?: number | null;
-}): ShipClass {
+  timestamp?: string | null;
+};
+
+/** True when the flags differ from the defaults (something is hidden or narrowed). */
+export function anyFilterActive(f: VesselFilterFlags): boolean {
+  return ALL_KEYS.some((k) => f[k] !== DEFAULT_VESSEL_FILTERS[k]);
+}
+
+export function anyFocusActive(f: VesselFilterFlags): boolean {
+  return FOCUS_KEYS.some((k) => f[k]);
+}
+
+const isOn = (x: unknown) => x === 1 || x === true;
+
+/** Category bucket used by both marker colour and the category filters. */
+export function vesselCategoryKey(v: FilterableVessel): VesselCategory {
+  const cat = String(v.category || '');
+  if (cat === 'research' || isOn(v.research)) return 'research';
+  if (cat === 'military' || isOn(v.military)) return 'military';
+  if ((CATEGORY_KEYS as readonly string[]).includes(cat)) return cat as VesselCategory;
+  const fc = String(v.flagCountry || '');
+  if ((CATEGORY_KEYS as readonly string[]).includes(fc)) return fc as VesselCategory;
+  return mmsiFlagCountry(v.mmsi);
+}
+
+export function vesselShipClass(v: FilterableVessel): ShipClass {
   const sc = String(v.shipClass || '');
   if ((SHIP_CLASS_KEYS as readonly string[]).includes(sc)) return sc as ShipClass;
   return resolveShipClass(v.shipType ?? null, v.shipTypeCode ?? null);
 }
 
-function shipClassVisible(shipClass: ShipClass, f: VesselFilterFlags): boolean {
-  return Boolean(f[shipClass]);
-}
-
-/**
- * Priority types (military / research): controlled only by their own toggle.
- * Civilians: controlled by country flag toggles.
- */
-function baseVisible(
-  v: {
-    category?: string;
-    military?: number | boolean;
-    research?: number | boolean;
-    flagCountry?: string;
-    mmsi?: string;
-  },
-  f: VesselFilterFlags
-): boolean {
-  if (isResearchVessel(v)) return f.research;
-  if (isMilitaryVessel(v)) return f.military;
-  return countryVisible(resolveFlagCountry(v), f);
-}
-
-function recentEnough(
-  v: { timestamp?: string | null },
-  f: VesselFilterFlags,
-  nowMs: number
-): boolean {
-  if (!f.recent6h) return true;
+function recentEnough(v: FilterableVessel, nowMs: number): boolean {
   const ts = v.timestamp ? Date.parse(String(v.timestamp)) : NaN;
-  if (!Number.isFinite(ts)) return false;
-  return nowMs - ts <= 6 * 60 * 60 * 1000;
+  return Number.isFinite(ts) && nowMs - ts <= 6 * 60 * 60 * 1000;
 }
 
-function onWatchlist(
-  v: { mmsi?: string },
-  f: VesselFilterFlags,
-  extras?: VesselFilterExtras
-): boolean {
-  if (!f.watchlistOnly) return true;
-  const mmsi = String(v.mmsi || '');
-  if (!mmsi) return false;
-  const raw = extras?.watchlistMmsis;
-  if (!raw) return false;
-  const set = raw instanceof Set ? raw : new Set([...raw].map(String));
-  return set.has(mmsi);
-}
-
-function countryVisibleExpr(f: VesselFilterFlags): any {
-  const parts: any[] = [];
-  if (f.norway) parts.push(['==', ['get', 'flagCountry'], 'norway']);
-  if (f.eu) parts.push(['==', ['get', 'flagCountry'], 'eu']);
-  if (f.china) parts.push(['==', ['get', 'flagCountry'], 'china']);
-  if (f.rest) parts.push(['==', ['get', 'flagCountry'], 'rest']);
-  if (f.russia) parts.push(['==', ['get', 'flagCountry'], 'russia']);
-  if (parts.length === 0) return ['==', ['get', 'mmsi'], ''];
-  if (parts.length === 1) return parts[0];
-  return ['any', ...parts];
-}
-
-function isResearchExpr(): any {
-  return [
-    'any',
-    ['==', ['get', 'category'], 'research'],
-    ['==', ['get', 'research'], 1],
-  ];
-}
-
-function isMilitaryExpr(): any {
-  return [
-    'any',
-    ['==', ['get', 'category'], 'military'],
-    ['==', ['get', 'military'], 1],
-  ];
-}
-
-function isPriorityExpr(): any {
-  return ['any', isResearchExpr(), isMilitaryExpr()];
-}
-
-/** MapLibre: (priority ∩ type-on) ∪ (civilian ∩ country-on) */
-function baseVisibleExpr(f: VesselFilterFlags): any {
-  const priorityParts: any[] = [];
-  if (f.research) priorityParts.push(isResearchExpr());
-  if (f.military) priorityParts.push(isMilitaryExpr());
-
-  const civilianOk: any = [
-    'all',
-    ['!', isPriorityExpr()],
-    countryVisibleExpr(f),
-  ];
-
-  if (priorityParts.length === 0) return civilianOk;
-  const priorityOk =
-    priorityParts.length === 1
-      ? priorityParts[0]
-      : (['any', ...priorityParts] as any);
-  return ['any', priorityOk, civilianOk];
-}
-
-function shipClassExpr(f: VesselFilterFlags): any {
-  const parts: any[] = [];
-  for (const k of SHIP_CLASS_KEYS) {
-    if (f[k]) parts.push(['==', ['get', 'shipClass'], k]);
-  }
-  if (parts.length === 0) return ['==', ['get', 'mmsi'], ''];
-  if (parts.length === 1) return parts[0];
-  return ['any', ...parts];
-}
-
-function focusExpr(f: VesselFilterFlags): any | null {
-  const parts: any[] = [];
-  if (f.sanctioned) parts.push(['==', ['get', 'sanctioned'], 1]);
-  if (f.shadow) parts.push(['==', ['get', 'shadowfleet'], 1]);
-  if (parts.length === 0) return null;
-  if (parts.length === 1) return parts[0];
-  return ['any', ...parts];
-}
-
-/** MapLibre filter expression, or null when everything is visible (defaults). */
-export function vesselFilterExpression(f: VesselFilterFlags): any | null {
-  if (!anyFilterActive(f)) return null;
-  const parts: any[] = [baseVisibleExpr(f), shipClassExpr(f)];
-  const focus = focusExpr(f);
-  if (focus) parts.push(focus);
-  // recent6h / watchlistOnly need runtime values — handled in vesselPassesFilter only
-  return parts.length === 1 ? parts[0] : ['all', ...parts];
+function toSet(raw: VesselFilterExtras['watchlistMmsis']): ReadonlySet<string> {
+  if (!raw) return new Set();
+  return raw instanceof Set ? raw : new Set([...raw].map(String));
 }
 
 export function vesselPassesFilter(
-  v: {
-    sanctioned?: number | boolean;
-    shadowfleet?: number | boolean;
-    military?: number | boolean;
-    research?: number | boolean;
-    category?: string;
-    flagCountry?: string;
-    mmsi?: string;
-    shipClass?: string;
-    shipType?: string | number | null;
-    shipTypeCode?: number | null;
-    timestamp?: string | null;
-  },
+  v: FilterableVessel,
   f: VesselFilterFlags,
   extras?: VesselFilterExtras
 ): boolean {
-  if (!baseVisible(v, f)) return false;
-  if (!shipClassVisible(resolveClass(v), f)) return false;
-  if (!recentEnough(v, f, extras?.nowMs ?? Date.now())) return false;
-  if (!onWatchlist(v, f, extras)) return false;
-
-  if (!f.sanctioned && !f.shadow) return true;
-  if (f.sanctioned && (v.sanctioned === 1 || v.sanctioned === true)) return true;
-  if (f.shadow && (v.shadowfleet === 1 || v.shadowfleet === true)) return true;
+  const cat = vesselCategoryKey(v);
+  if (!f[cat]) return false;
+  if (cat !== 'military' && cat !== 'research' && !f[vesselShipClass(v)]) return false;
+  if (f.recent6h && !recentEnough(v, extras?.nowMs ?? Date.now())) return false;
+  if (!anyFocusActive(f)) return true;
+  if (f.russianFlag && (v.flagCountry || mmsiFlagCountry(v.mmsi)) === 'russia') return true;
+  if (f.sanctioned && isOn(v.sanctioned)) return true;
+  if (f.shadow && isOn(v.shadowfleet)) return true;
+  if (f.watchlistOnly && toSet(extras?.watchlistMmsis).has(String(v.mmsi || ''))) return true;
   return false;
 }
 
-/** Merge stored/URL filter blobs onto defaults; ignore legacy exclusive-only shape. */
+/** Merge stored/URL filter blobs onto defaults, migrating older shapes. */
 export function mergeVesselFilters(
   raw: Partial<VesselFilterFlags> | Record<string, unknown> | null | undefined
 ): VesselFilterFlags {
-  if (!raw || typeof raw !== 'object') return { ...DEFAULT_VESSEL_FILTERS };
-  if (typeof (raw as VesselFilterFlags).norway === 'boolean') {
-    return { ...DEFAULT_VESSEL_FILTERS, ...(raw as Partial<VesselFilterFlags>) };
+  const f = { ...DEFAULT_VESSEL_FILTERS };
+  if (!raw || typeof raw !== 'object') return f;
+  const r = raw as Record<string, unknown>;
+  // Legacy exclusive-only shape: just the focus flags
+  if (typeof r.norway !== 'boolean') {
+    f.sanctioned = Boolean(r.sanctioned);
+    f.shadow = Boolean(r.shadow);
+    return f;
   }
-  return {
-    ...DEFAULT_VESSEL_FILTERS,
-    sanctioned: Boolean(raw.sanctioned),
-    shadow: Boolean(raw.shadow),
-  };
+  for (const k of ALL_KEYS) {
+    if (typeof r[k] === 'boolean') f[k] = r[k] as boolean;
+  }
+  // v1 had a separate "Military / law" AIS type toggle next to the Military category
+  if (r.militaryAis === false) f.military = false;
+  return f;
 }
 
-/** Compact URL tokens: `-norway` hides a category; `sanctioned`/`shadow`/`age6`/`watchlist` enable extras. */
+const URL_ALIASES: Record<string, keyof VesselFilterFlags> = {
+  ru: 'russianFlag',
+  russian: 'russia',
+  shadowfleet: 'shadow',
+  age6: 'recent6h',
+  recent6h: 'recent6h',
+  watchlist: 'watchlistOnly',
+  favorites: 'watchlistOnly',
+  devices: 'device',
+  tug_work: 'tugWork',
+  'tug-work': 'tugWork',
+  tugwork: 'tugWork',
+  militaryais: 'military',
+  military_ais: 'military',
+  'military-ais': 'military',
+};
+
+const URL_NAMES: Partial<Record<keyof VesselFilterFlags, string>> = {
+  russianFlag: 'ru',
+  recent6h: 'age6',
+  watchlistOnly: 'watchlist',
+};
+
+function urlKey(token: string): keyof VesselFilterFlags | null {
+  if (URL_ALIASES[token]) return URL_ALIASES[token];
+  const hit = ALL_KEYS.find((k) => k.toLowerCase() === token);
+  return hit ?? null;
+}
+
+/** Compact URL tokens: `-norway` hides a default-on toggle; `sanctioned`, `device`, … enable a default-off one. */
 export function vesselFiltersToUrlTokens(f: VesselFilterFlags): string[] {
   const out: string[] = [];
-  for (const k of COUNTRY_KEYS) if (!f[k]) out.push(`-${k}`);
-  for (const k of TYPE_KEYS) if (!f[k]) out.push(`-${k}`);
-  for (const k of SHIP_CLASS_KEYS) if (!f[k]) out.push(`-${k}`);
-  if (f.sanctioned) out.push('sanctioned');
-  if (f.shadow) out.push('shadow');
-  if (f.recent6h) out.push('age6');
-  if (f.watchlistOnly) out.push('watchlist');
+  for (const k of ALL_KEYS) {
+    if (f[k] === DEFAULT_VESSEL_FILTERS[k]) continue;
+    const name = URL_NAMES[k] ?? k;
+    out.push(f[k] ? name : `-${name}`);
+  }
   return out;
 }
 
@@ -347,17 +202,33 @@ export function vesselFiltersFromUrlTokens(tokens: string[]): VesselFilterFlags 
   const f = { ...DEFAULT_VESSEL_FILTERS };
   for (const raw of tokens) {
     const t = raw.trim().toLowerCase();
-    if (t === 'sanctioned') f.sanctioned = true;
-    else if (t === 'shadow' || t === 'shadowfleet') f.shadow = true;
-    else if (t === 'age6' || t === 'recent6h') f.recent6h = true;
-    else if (t === 'watchlist' || t === 'favorites') f.watchlistOnly = true;
-    else if (t.startsWith('-')) {
-      const key = t.slice(1);
-      if (key === 'russian') f.russia = false;
-      else if (key === 'tug_work' || key === 'tug-work') f.tugWork = false;
-      else if (key === 'military_ais' || key === 'military-ais') f.militaryAis = false;
-      else if (key in f) (f as any)[key] = false;
-    }
+    const off = t.startsWith('-');
+    const key = urlKey(t.replace(/^[-+]/, ''));
+    if (key) f[key] = !off;
   }
   return f;
+}
+
+/** One-click starting points for common research questions. */
+export const VESSEL_FILTER_PRESETS: { id: string; label: string; filters: VesselFilterFlags }[] = [
+  { id: 'all', label: 'All ships', filters: { ...DEFAULT_VESSEL_FILTERS } },
+  {
+    id: 'interest',
+    label: 'Vessels of interest',
+    filters: { ...DEFAULT_VESSEL_FILTERS, russianFlag: true, sanctioned: true, shadow: true },
+  },
+  {
+    id: 'sanctions',
+    label: 'Sanctions & shadow',
+    filters: { ...DEFAULT_VESSEL_FILTERS, sanctioned: true, shadow: true },
+  },
+  {
+    id: 'watchlist',
+    label: 'Watchlist',
+    filters: { ...DEFAULT_VESSEL_FILTERS, watchlistOnly: true },
+  },
+];
+
+export function sameFilters(a: VesselFilterFlags, b: VesselFilterFlags): boolean {
+  return ALL_KEYS.every((k) => a[k] === b[k]);
 }

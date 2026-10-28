@@ -23,11 +23,35 @@ export type AreaAlertRule = {
   insideSince: Record<string, string>;
   /** mmsis already notified this watch (avoid repeat spam) */
   notified: string[];
+  /**
+   * "Any ship" watches: vessels already inside on the first check. They only
+   * alert after leaving and coming back, so a busy area doesn't fire instantly.
+   */
+  baseline: string[];
+  /** True once the first check has run (baseline captured). */
+  primed: boolean;
+  /** Newest first, capped — a watch keeps running after the first hit. */
+  hits: AlertHit[];
+  /** 'triggered' is legacy (watches used to stop after one hit); read as 'watching'. */
   status: 'watching' | 'triggered' | 'expired';
   triggeredAt: string | null;
   message: string | null;
   lastEmailError: string | null;
 };
+
+export type AlertHit = { mmsi: string; name: string; at: string; message: string };
+
+export type AlertPosition = {
+  mmsi?: unknown;
+  lon?: unknown;
+  lat?: unknown;
+  longitude?: unknown;
+  latitude?: unknown;
+  vessel_name?: unknown;
+  name?: unknown;
+};
+
+const MAX_HITS = 50;
 
 export type AlertAreaDef = {
   id: Exclude<AlertAreaId, 'custom'>;
@@ -94,6 +118,9 @@ function migrateV1(r: any): AreaAlertRule {
     createdAt: r.createdAt || new Date().toISOString(),
     insideSince: r.enteredAt && mmsi ? { [mmsi]: r.enteredAt } : {},
     notified: [],
+    baseline: [],
+    primed: false,
+    hits: [],
     status: r.status || 'watching',
     triggeredAt: r.triggeredAt || null,
     message: r.message || null,
@@ -101,7 +128,7 @@ function migrateV1(r: any): AreaAlertRule {
   });
 }
 
-function normalizeRule(r: any): AreaAlertRule {
+export function normalizeRule(r: any): AreaAlertRule {
   return {
     id: String(r.id),
     mmsis: Array.isArray(r.mmsis) ? r.mmsis.map(normalizeMmsi) : [],
@@ -115,7 +142,11 @@ function normalizeRule(r: any): AreaAlertRule {
     createdAt: r.createdAt || new Date().toISOString(),
     insideSince: r.insideSince && typeof r.insideSince === 'object' ? r.insideSince : {},
     notified: Array.isArray(r.notified) ? r.notified : [],
-    status: r.status || 'watching',
+    baseline: Array.isArray(r.baseline) ? r.baseline : [],
+    // Rules from before baselines existed have already been running — don't re-prime them
+    primed: typeof r.primed === 'boolean' ? r.primed : Array.isArray(r.notified),
+    hits: Array.isArray(r.hits) ? r.hits.slice(0, MAX_HITS) : [],
+    status: r.status === 'expired' ? 'expired' : 'watching',
     triggeredAt: r.triggeredAt || null,
     message: r.message || null,
     lastEmailError: r.lastEmailError || null,
@@ -157,6 +188,9 @@ export function createAlertRule(input: {
     createdAt: new Date().toISOString(),
     insideSince: {},
     notified: [],
+    baseline: [],
+    primed: false,
+    hits: [],
     status: 'watching',
     triggeredAt: null,
     message: null,
@@ -179,4 +213,107 @@ export function ruleWatchSummary(rule: AreaAlertRule): string {
   const dwell =
     rule.dwellMinutes <= 0 ? 'on entry' : `≥${rule.dwellMinutes} min`;
   return `${ships} · ${rule.areaLabel} · ${dwell} · ${rule.watchHours}h`;
+}
+
+/**
+ * One evaluation pass of a watch against live positions. Shared by the browser
+ * (notifications + UI) and the scripts-runner watcher (email), so both agree.
+ */
+export function evaluateAlertRule(
+  rule: AreaAlertRule,
+  positions: AlertPosition[],
+  inArea: (lon: number, lat: number) => boolean,
+  nowMs: number = Date.now()
+): { rule: AreaAlertRule; hits: AlertHit[]; changed: boolean } {
+  if (rule.status === 'expired') return { rule, hits: [], changed: false };
+
+  if (nowMs > new Date(rule.createdAt).getTime() + rule.watchHours * 3600_000) {
+    return {
+      rule: { ...rule, status: 'expired', message: `Watch ended (${rule.watchHours}h)` },
+      hits: [],
+      changed: true,
+    };
+  }
+
+  const nowIso = new Date(nowMs).toISOString();
+  const watchAny = rule.mmsis.length === 0;
+  const wanted = new Set(rule.mmsis);
+  const insideSince = { ...rule.insideSince };
+  const notified = new Set(rule.notified);
+  const baseline = new Set(rule.baseline);
+  const vesselNames = { ...rule.vesselNames };
+  const stillInside = new Set<string>();
+  const hits: AlertHit[] = [];
+  let changed = !rule.primed || rule.status !== 'watching';
+
+  for (const v of positions) {
+    const mmsi = normalizeMmsi(String(v.mmsi ?? ''));
+    if (!mmsi || mmsi === '000000000') continue;
+    if (!watchAny && !wanted.has(mmsi)) continue;
+    const lon = Number(v.lon ?? v.longitude);
+    const lat = Number(v.lat ?? v.latitude);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat) || !inArea(lon, lat)) continue;
+
+    stillInside.add(mmsi);
+    const name = String(v.vessel_name || v.name || '').trim();
+    if (name && vesselNames[mmsi] !== name) {
+      vesselNames[mmsi] = name;
+      changed = true;
+    }
+    if (watchAny && !rule.primed) {
+      baseline.add(mmsi);
+      continue;
+    }
+    if (baseline.has(mmsi) || notified.has(mmsi)) continue;
+    if (!insideSince[mmsi]) {
+      insideSince[mmsi] = nowIso;
+      changed = true;
+    }
+    if (nowMs - new Date(insideSince[mmsi]).getTime() < rule.dwellMinutes * 60_000) continue;
+
+    notified.add(mmsi);
+    const label = vesselNames[mmsi] || `MMSI ${mmsi}`;
+    // A specifically watched ship that was already there when the watch started
+    const verb = !rule.primed ? 'is inside' : 'entered';
+    hits.push({
+      mmsi,
+      name: label,
+      at: nowIso,
+      message: `${label} ${verb} ${rule.areaLabel}${
+        rule.dwellMinutes > 0 ? ` (≥${rule.dwellMinutes} min)` : ''
+      }`,
+    });
+  }
+
+  for (const m of Object.keys(insideSince)) {
+    if (!stillInside.has(m)) {
+      delete insideSince[m];
+      changed = true;
+    }
+  }
+  for (const m of baseline) {
+    if (!stillInside.has(m)) {
+      baseline.delete(m);
+      changed = true;
+    }
+  }
+
+  if (!hits.length && !changed) return { rule, hits, changed: false };
+  const latest = hits[hits.length - 1];
+  return {
+    rule: {
+      ...rule,
+      status: 'watching',
+      primed: true,
+      insideSince,
+      notified: [...notified],
+      baseline: [...baseline],
+      vesselNames,
+      hits: [...[...hits].reverse(), ...rule.hits].slice(0, MAX_HITS),
+      triggeredAt: latest ? latest.at : rule.triggeredAt,
+      message: latest ? latest.message : rule.message,
+    },
+    hits,
+    changed: true,
+  };
 }

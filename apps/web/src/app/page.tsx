@@ -41,14 +41,13 @@ import {
   parseUrlState,
   writeUrlState,
   copyShareUrl,
-  anyFilterActive,
   mergeVesselFilters,
   vesselFiltersToUrlTokens,
   vesselFiltersFromUrlTokens,
-  SHIP_CLASS_KEYS,
-  SHIP_CLASS_LABELS,
   resolveShipClass,
+  vesselPassesFilter,
 } from '@svalmap/ui';
+import VesselFilterPanel from './VesselFilterPanel';
 
 const MapCanvas = dynamic(() => import('./MapCanvas'), { ssr: false });
 
@@ -144,9 +143,7 @@ function LayerRow({
 
 export default function HomePage() {
   const [drawerOpen, setDrawerOpen] = useState(true);
-  const [eaOpen, setEaOpen] = useState(false);
   const [coverageOpen, setCoverageOpen] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(true);
   const [navWarningsOpen, setNavWarningsOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
@@ -182,7 +179,8 @@ export default function HomePage() {
     process.env.NEXT_PUBLIC_MAP_STYLE || '/styles/svalmap-dark.json';
   const attribution =
     process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ||
-    '© NRK / Kartverket © OpenStreetMap contributors';
+    // Basemap credit (OpenFreeMap · OpenMapTiles · OpenStreetMap) comes from the style source
+    'AIS: BarentsWatch, AISStream · Events: Global Fishing Watch';
   const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY || '';
   // If style URL is MapTiler without ?key=, append it
   const mapStyleWithKey =
@@ -397,14 +395,23 @@ export default function HomePage() {
     setPendingMmsi(null);
   }, []);
 
-  const openVesselFromGfw = useCallback(
+  /**
+   * Open a vessel by MMSI from anywhere (search, watchlist, GFW, incidents).
+   * Uses the live record when present; otherwise shows a stub that upgrades
+   * itself once the vessel shows up in the live feed.
+   */
+  const openVesselByMmsi = useCallback(
     (
       mmsi: string,
       opts?: {
         name?: string | null;
+        imo?: string | null;
+        shipType?: string | null;
         russian?: boolean;
         sanctioned?: boolean;
         shadowfleet?: boolean;
+        military?: boolean;
+        research?: boolean;
         lon?: number;
         lat?: number;
       }
@@ -419,6 +426,11 @@ export default function HomePage() {
       }
       const country = countryInfoFromMmsi(id);
       const name = (opts?.name && opts.name.trim()) || `MMSI ${id}`;
+      const imo = opts?.imo || null;
+      const shipType = opts?.shipType || null;
+      const category = opts?.research
+        ? 'research'
+        : mmsiCategory(id, shipType, imo, opts?.military);
       // Keep pending so the stub upgrades when the vessel appears live
       setPendingMmsi(id);
       setSelection({
@@ -427,23 +439,23 @@ export default function HomePage() {
           mmsi: id,
           name,
           label: name,
-          category: opts?.russian ? 'russia' : mmsiCategory(id),
+          category: opts?.russian && category === 'rest' ? 'russia' : category,
           flagCountry: mmsiFlagCountry(id),
-          shipClass: 'unknown',
+          shipClass: resolveShipClass(shipType),
           speed: null,
-          imo: null,
+          imo,
           course: null,
           heading: null,
           destination: null,
-          shipType: null,
+          shipType,
           status: null,
           eta: null,
           timestamp: null,
           source: null,
           sanctioned: opts?.sanctioned ? 1 : 0,
           shadowfleet: opts?.shadowfleet ? 1 : 0,
-          military: 0,
-          research: 0,
+          military: category === 'military' ? 1 : 0,
+          research: category === 'research' ? 1 : 0,
           country: country.name,
           flag: country.iso,
           lon: Number.isFinite(opts?.lon) ? (opts!.lon as number) : null,
@@ -486,19 +498,29 @@ export default function HomePage() {
     if (hit) openVessel(hit);
   }, [pendingMmsi, liveVessels, openVessel]);
 
+  // Keep the open detail card in step with the 20 s live refresh
+  useEffect(() => {
+    setSelection((prev) => {
+      if (prev?.kind !== 'vessel') return prev;
+      const hit = liveVessels.find((v) => v.mmsi === prev.vessel.mmsi);
+      return hit && hit !== prev.vessel ? { kind: 'vessel', vessel: hit } : prev;
+    });
+  }, [liveVessels]);
+
+  const dossierMmsi = selection?.kind === 'vessel' ? selection.vessel.mmsi : null;
+  const dossierImo = selection?.kind === 'vessel' ? selection.vessel.imo : null;
+
   // Sanctions dossier for selected vessel
   useEffect(() => {
-    if (selection?.kind !== 'vessel') {
-      setSanctionsInfo(null);
-      return;
-    }
-    const v = selection.vessel;
+    // Clear first so the previous vessel's "Yes (list hit)" never shows on the new one
+    setSanctionsInfo(null);
+    if (!dossierMmsi && !dossierImo) return;
     let cancelled = false;
     (async () => {
       try {
         const q = new URLSearchParams();
-        if (v.mmsi) q.set('mmsi', v.mmsi);
-        if (v.imo) q.set('imo', v.imo);
+        if (dossierMmsi) q.set('mmsi', dossierMmsi);
+        if (dossierImo) q.set('imo', dossierImo);
         const r = await fetch(`${apiBase}/api/sanctions/lookup?${q}`, { cache: 'no-store' });
         const j = await r.json();
         if (!cancelled) setSanctionsInfo(j);
@@ -509,7 +531,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [selection, apiBase]);
+  }, [dossierMmsi, dossierImo, apiBase]);
 
   const anyGfw =
     gfw.loitering ||
@@ -555,10 +577,6 @@ export default function HomePage() {
         ? '#fff'
         : '#fff';
 
-  const setFilterFlag = (key: keyof VesselFilterFlags, on: boolean) => {
-    setVesselFilters((prev) => ({ ...prev, [key]: on }));
-  };
-
   return (
     <div
       className={`relative w-full h-screen overflow-hidden ${drawerOpen ? 'layers-open' : ''}`}
@@ -567,38 +585,19 @@ export default function HomePage() {
         <div className="brand">SvalMap</div>
         <VesselSearch
           apiBase={apiBase}
-          onSelect={(hit) => {
-            openVessel({
-              mmsi: hit.mmsi,
-              name: hit.vessel_name || hit.name || '',
-              label: hit.vessel_name || hit.name || `MMSI ${hit.mmsi}`,
-              category: hit.research
-                ? 'research'
-                : hit.military
-                  ? 'military'
-                  : mmsiCategory(hit.mmsi),
-              flagCountry: mmsiFlagCountry(hit.mmsi),
-              speed: null,
-              imo: hit.imo || null,
-              course: null,
-              heading: null,
-              destination: null,
-              shipType: hit.shipType || null,
-              status: null,
-              eta: null,
-              timestamp: null,
-              source: null,
-              shipClass: resolveShipClass(hit.shipType || null),
-              sanctioned: hit.sanctioned ? 1 : 0,
-              shadowfleet: hit.shadowfleet ? 1 : 0,
-              military: hit.military ? 1 : 0,
-              research: hit.research ? 1 : 0,
-              country: countryInfoFromMmsi(hit.mmsi).name,
-              flag: countryInfoFromMmsi(hit.mmsi).iso,
+          onSelect={(hit) =>
+            openVesselByMmsi(hit.mmsi, {
+              name: hit.vessel_name || hit.name,
+              imo: hit.imo,
+              shipType: hit.shipType,
+              sanctioned: hit.sanctioned,
+              shadowfleet: hit.shadowfleet,
+              military: hit.military,
+              research: hit.research,
               lon: hit.lon,
               lat: hit.lat,
-            });
-          }}
+            })
+          }
         />
         <div className="chrome-meta">
           <span
@@ -654,166 +653,30 @@ export default function HomePage() {
               checked={shipsVisible}
               onChange={setShipsVisible}
             />
-            <label className="item item-toggle">
-              <span className="label">Track lookback</span>
-              <span className="menu-icon-slot" aria-hidden />
-              <span className="item-control">
-                <select
-                  className="track-days-select"
-                  value={trackDays}
-                  onChange={(e) => setTrackDays(Number(e.target.value))}
-                  disabled={!shipsVisible}
-                  title="BarentsWatch historic AIS, max 14 days"
-                >
-                  {[1, 2, 3, 5, 7, 10, 14].map((d) => (
-                    <option key={d} value={d}>
-                      {d}d
-                    </option>
-                  ))}
-                </select>
-              </span>
-            </label>
-
-            <button
-              type="button"
-              className={`disclaimer-toggle ${filtersOpen ? 'open' : ''}`}
-              onClick={() => setFiltersOpen((v) => !v)}
-              aria-expanded={filtersOpen}
-            >
-              Ship filters
-              {anyFilterActive(vesselFilters) ? ' · on' : ''}
-            </button>
-            {filtersOpen && (
-              <div className="group">
-                <div className="item hint">
-                  {vesselFilters.sanctioned || vesselFilters.shadow
-                    ? 'Focus on — only sanctioned and/or shadow ships'
-                    : anyFilterActive(vesselFilters)
-                      ? 'Some categories hidden'
-                      : 'All ships visible — uncheck a category to hide it'}
-                </div>
-                {anyFilterActive(vesselFilters) && (
-                  <button
-                    type="button"
-                    className="text-btn"
-                    style={{ margin: '4px 0 8px' }}
-                    onClick={() => setVesselFilters({ ...DEFAULT_VESSEL_FILTERS })}
-                  >
-                    Show all ships
-                  </button>
-                )}
-                <div className="item hint" style={{ opacity: 0.75 }}>
-                  Commercial &amp; other by flag
-                </div>
-                <LayerRow
-                  label="Norwegian"
-                  checked={vesselFilters.norway}
-                  onChange={(on) => setFilterFlag('norway', on)}
-                />
-                <LayerRow
-                  label="EU"
-                  checked={vesselFilters.eu}
-                  onChange={(on) => setFilterFlag('eu', on)}
-                />
-                <LayerRow
-                  label="Chinese"
-                  checked={vesselFilters.china}
-                  onChange={(on) => setFilterFlag('china', on)}
-                />
-                <LayerRow
-                  label="Rest of world"
-                  checked={vesselFilters.rest}
-                  onChange={(on) => setFilterFlag('rest', on)}
-                />
-                <LayerRow
-                  label="Russian"
-                  checked={vesselFilters.russia}
-                  onChange={(on) => setFilterFlag('russia', on)}
-                />
-                <div className="item hint" style={{ opacity: 0.75, marginTop: 6 }}>
-                  Always shown when on (ignore country)
-                </div>
-                <LayerRow
-                  label="Research"
-                  checked={vesselFilters.research}
-                  onChange={(on) => setFilterFlag('research', on)}
-                />
-                <LayerRow
-                  label="Military"
-                  checked={vesselFilters.military}
-                  onChange={(on) => setFilterFlag('military', on)}
-                />
-                <div className="item hint" style={{ opacity: 0.75, marginTop: 6 }}>
-                  AIS ship type
-                </div>
-                {SHIP_CLASS_KEYS.map((key) => (
-                  <LayerRow
-                    key={key}
-                    label={SHIP_CLASS_LABELS[key]}
-                    checked={vesselFilters[key]}
-                    onChange={(on) => setFilterFlag(key, on)}
-                  />
-                ))}
-                <div className="item hint" style={{ opacity: 0.75, marginTop: 6 }}>
-                  Extra
-                </div>
-                <LayerRow
-                  label="Updated last 6 hours"
-                  checked={vesselFilters.recent6h}
-                  onChange={(on) => setFilterFlag('recent6h', on)}
-                />
-                <LayerRow
-                  label="Watchlist only"
-                  checked={vesselFilters.watchlistOnly}
-                  onChange={(on) => setFilterFlag('watchlistOnly', on)}
-                />
-                <div className="item hint" style={{ opacity: 0.75, marginTop: 6 }}>
-                  Focus (optional — narrows further)
-                </div>
-                <LayerRow
-                  label="Sanctioned"
-                  checked={vesselFilters.sanctioned}
-                  onChange={(on) => setFilterFlag('sanctioned', on)}
-                />
-                <LayerRow
-                  label="Shadow fleet"
-                  checked={vesselFilters.shadow}
-                  onChange={(on) => setFilterFlag('shadow', on)}
-                />
-              </div>
-            )}
+            <VesselFilterPanel
+              filters={vesselFilters}
+              onChange={setVesselFilters}
+              vessels={liveVessels}
+              watchlistMmsis={watchlistMmsis}
+            />
 
             <WatchlistPanel
               state={watchlist}
               onOpen={(mmsi) => {
-                const hit = liveVessels.find((v) => v.mmsi === mmsi);
-                if (hit) openVessel(hit);
-                else setPendingMmsi(mmsi);
+                const entry = watchlist.entries.find((e) => e.mmsi === mmsi);
+                openVesselByMmsi(mmsi, { name: entry?.name, imo: entry?.imo });
               }}
               onRemove={(mmsi) => setWatchlist((s) => removeWatchEntry(s, mmsi))}
             />
 
-            <LayerRow
-              label="Live heuristics"
-              checked={showIncidents}
-              onChange={setShowIncidents}
-            />
-            <LiveIncidentsPanel
-              apiBase={apiBase}
-              enabled={showIncidents}
-              onFocus={(inc) => {
-                const mmsi = inc.mmsi[0];
-                const hit = liveVessels.find((v) => v.mmsi === mmsi);
-                if (hit) openVessel(hit);
-                else setPendingMmsi(mmsi);
-              }}
-            />
             <button
               type="button"
               className="text-btn export-btn"
               onClick={() =>
                 exportGeoJSONSnapshot({
-                  vessels: liveVessels.map((v) => ({
+                  vessels: liveVessels
+                    .filter((v) => vesselPassesFilter(v, vesselFilters, { watchlistMmsis }))
+                    .map((v) => ({
                     type: 'Feature',
                     geometry: {
                       type: 'Point',
@@ -821,17 +684,27 @@ export default function HomePage() {
                     },
                     properties: v,
                   })),
-                  label: 'live vessels snapshot',
+                  label: 'visible vessels snapshot',
                 })
               }
             >
-              Export live vessels (GeoJSON)
+              Export visible ships (GeoJSON)
             </button>
 
-            {/* —— Fishing Watch —— */}
-            <div className="section-header">Fishing Watch</div>
-            <div className="item hint">
-              Events: RU / sanctioned / shadow · AIS-off &amp; SAR on by default
+            {/* —— Suspicious activity: live heuristics + Global Fishing Watch —— */}
+            <div className="section-header">Suspicious activity</div>
+            <LayerRow
+              label="Live: stopped or meeting at sea"
+              checked={showIncidents}
+              onChange={setShowIncidents}
+            />
+            <LiveIncidentsPanel
+              apiBase={apiBase}
+              enabled={showIncidents}
+              onFocus={(inc) => openVesselByMmsi(inc.mmsi[0])}
+            />
+            <div className="item hint filter-group-hint">
+              Global Fishing Watch · last 30 days · Russian, sanctioned &amp; shadow-fleet vessels
             </div>
             <LayerRow
               label="Loitering"
@@ -925,39 +798,24 @@ export default function HomePage() {
 
             {/* —— Maritime zones —— */}
             <div className="section-header">Maritime zones</div>
-            <div className="item item-toggle">
-              <span className="label">Economic areas</span>
-              <img className="menu-icon" src="/menu/EEZs.svg" alt="" />
-              <span className="item-control">
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => setEaOpen((v) => !v)}
-                >
-                  {eaOpen ? 'Hide' : 'Show'}
-                </button>
-              </span>
-            </div>
-            <div className="group" style={{ display: eaOpen ? 'block' : 'none' }}>
-              <LayerRow
-                label="Norway EEZ"
-                icon="/menu/EEZs.svg"
-                checked={overlays['eez-norway']}
-                onChange={(on) => setOverlay('eez-norway', on)}
-              />
-              <LayerRow
-                label="Jan Mayen EEZ"
-                icon="/menu/EEZs.svg"
-                checked={overlays['eez-janmayen']}
-                onChange={(on) => setOverlay('eez-janmayen', on)}
-              />
-              <LayerRow
-                label="Svalbard FPZ"
-                icon="/menu/EEZs.svg"
-                checked={overlays['eez-svalbard']}
-                onChange={(on) => setOverlay('eez-svalbard', on)}
-              />
-            </div>
+            <LayerRow
+              label="Svalbard FPZ"
+              icon="/menu/EEZs.svg"
+              checked={overlays['eez-svalbard']}
+              onChange={(on) => setOverlay('eez-svalbard', on)}
+            />
+            <LayerRow
+              label="Norway EEZ"
+              icon="/menu/EEZs.svg"
+              checked={overlays['eez-norway']}
+              onChange={(on) => setOverlay('eez-norway', on)}
+            />
+            <LayerRow
+              label="Jan Mayen EEZ"
+              icon="/menu/EEZs.svg"
+              checked={overlays['eez-janmayen']}
+              onChange={(on) => setOverlay('eez-janmayen', on)}
+            />
             <LayerRow
               label="Ice edge"
               checked={overlays['ice-edge']}
@@ -1064,7 +922,8 @@ export default function HomePage() {
                 registered vessels except fishing under 15&nbsp;m and recreational under 45&nbsp;m
                 (when length is known). Elsewhere in the North Atlantic north of 54°N: Russian
                 vessels, curated research vessels, shadow fleet, sanctioned vessels, and military /
-                law enforcement. Live AIS via AISStream + BarentsWatch (~20&nbsp;s refresh).
+                law enforcement. Live AIS via AISStream + BarentsWatch (~20&nbsp;s refresh). Fishing-gear
+                buoys and other AIS beacons are hidden by default (Ship filters → Ship type).
               </div>
             )}
           </div>
@@ -1101,8 +960,11 @@ export default function HomePage() {
           alertPolygons={alertRules
             .filter((r) => r.areaId === 'custom' && r.polygon && r.status === 'watching')
             .map((r) => ({ id: r.id, polygon: r.polygon!, label: r.areaLabel }))}
-          onDraftPoint={(lon, lat) => {
-            setDraftRing((prev) => [...prev, [lon, lat]]);
+          onDraftChange={setDraftRing}
+          onDrawFinish={() => setDrawingAoi(false)}
+          onDrawCancel={() => {
+            setDrawingAoi(false);
+            setDraftRing([]);
           }}
           onVesselSelect={openVessel}
           onGfwEventSelect={openGfwEvent}
@@ -1257,15 +1119,30 @@ export default function HomePage() {
                         : 'Not available'}
                     </span>
                   </div>
+                  <label className="row track-row">
+                    <span className="k">Track history:</span>
+                    <select
+                      className="track-days-select"
+                      value={trackDays}
+                      onChange={(e) => setTrackDays(Number(e.target.value))}
+                      title="BarentsWatch historic AIS (Norwegian coverage), max 14 days"
+                    >
+                      {[1, 2, 3, 5, 7, 10, 14].map((d) => (
+                        <option key={d} value={d}>
+                          {d === 1 ? 'Last 24 h' : `Last ${d} days`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {aisStatus.trackStatus === 'loading' && (
-                    <div className="row muted">Loading {trackDays}d track…</div>
+                    <div className="row muted">Loading track…</div>
                   )}
                   {aisStatus.trackStatus === 'error' && (
                     <div className="row muted">{aisStatus.trackError}</div>
                   )}
                   {aisStatus.trackStatus === 'ready' && (
                     <div className="row muted">
-                      Orange line: last {trackDays}d AIS track (BarentsWatch, Norwegian waters)
+                      Orange line on the map (BarentsWatch, Norwegian waters)
                     </div>
                   )}
                   {sanctionsInfo && (
@@ -1472,7 +1349,7 @@ export default function HomePage() {
                         type="button"
                         className="detail-action"
                         onClick={() =>
-                          openVesselFromGfw(ev.mmsi!, {
+                          openVesselByMmsi(ev.mmsi!, {
                             name: ev.vessels,
                             russian: ev.russian,
                             sanctioned: ev.sanctioned,
@@ -1519,7 +1396,7 @@ export default function HomePage() {
                         type="button"
                         className="detail-action"
                         onClick={() =>
-                          openVesselFromGfw(ev.partnerMmsi!, {
+                          openVesselByMmsi(ev.partnerMmsi!, {
                             name: `Partner ${ev.partnerMmsi}`,
                           })
                         }

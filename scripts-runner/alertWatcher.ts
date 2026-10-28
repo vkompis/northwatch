@@ -9,6 +9,7 @@ import {
   type ServerAlertRule,
 } from './alertMail';
 import { dataSource } from './paths';
+import { evaluateAlertRule, normalizeRule } from '../packages/ui/src/utils/areaAlerts';
 
 type Position = {
   mmsi: string;
@@ -66,7 +67,7 @@ export function startAlertWatcher(fetchPositions: FetchPositions, intervalMs = 3
   console.log('[alertWatcher] started (file-backed rules)');
 
   async function tick() {
-    const rules = listServerAlerts().filter((r) => r.status === 'watching');
+    const rules = listServerAlerts().filter((r) => r.status !== 'expired');
     if (!rules.length) return;
     let positions: Position[] = [];
     try {
@@ -77,17 +78,8 @@ export function startAlertWatcher(fetchPositions: FetchPositions, intervalMs = 3
     }
     const now = Date.now();
 
-    for (const rule of rules) {
-      const expires = new Date(rule.createdAt).getTime() + rule.watchHours * 3600_000;
-      if (now > expires) {
-        upsertServerAlert({
-          ...rule,
-          status: 'expired',
-          message: `Watch ended (${rule.watchHours}h)`,
-        });
-        continue;
-      }
-
+    for (const stored of rules) {
+      const rule = normalizeRule(stored);
       let gj: any;
       try {
         gj = await loadAreaGeoJSON(rule);
@@ -96,78 +88,23 @@ export function startAlertWatcher(fetchPositions: FetchPositions, intervalMs = 3
       }
       if (!gj) continue;
 
-      const candidates =
-        rule.mmsis.length === 0
-          ? positions
-          : positions.filter((v) => {
-              const m = String(v.mmsi ?? '').replace(/\D/g, '').padStart(9, '0').slice(-9);
-              return rule.mmsis.includes(m);
-            });
-
-      const insideSince = { ...(rule.insideSince || {}) };
-      const notified = [...(rule.notified || [])];
-      const vesselNames = { ...(rule.vesselNames || {}) };
-      let status = rule.status;
-      let triggeredAt = rule.triggeredAt;
-      let message = rule.message;
-      let changed = false;
-      const stillInside = new Set<string>();
-
-      for (const v of candidates) {
-        const mmsi = String(v.mmsi ?? '').replace(/\D/g, '').padStart(9, '0').slice(-9);
-        if (!mmsi) continue;
-        if (!pointIn(v.lon, v.lat, gj)) continue;
-        stillInside.add(mmsi);
-        if (v.vessel_name) vesselNames[mmsi] = String(v.vessel_name);
-        if (!insideSince[mmsi]) {
-          insideSince[mmsi] = new Date().toISOString();
-          changed = true;
+      const result = evaluateAlertRule(rule, positions, (lon, lat) => pointIn(lon, lat, gj), now);
+      for (const hit of result.hits) {
+        if (!rule.email) {
+          console.log('[alertWatcher]', hit.message);
+          continue;
         }
-        const dwellMs = now - new Date(insideSince[mmsi]).getTime();
-        if (dwellMs < rule.dwellMinutes * 60_000) continue;
-        if (notified.includes(mmsi)) continue;
-
-        notified.push(mmsi);
-        status = 'triggered';
-        triggeredAt = new Date().toISOString();
-        const name = vesselNames[mmsi] || `MMSI ${mmsi}`;
-        message = `${name} entered ${rule.areaLabel}${
-          rule.dwellMinutes > 0 ? ` (≥${rule.dwellMinutes} min)` : ''
-        }`;
-        changed = true;
-
-        if (rule.email) {
-          const result = await sendAlertEmail({
-            to: rule.email,
-            subject: `SvalMap alert: ${rule.areaLabel}`,
-            text: `${message}\n\nRule: ${rule.id}\nTime: ${new Date().toISOString()}\n`,
-          });
-          if (!result.ok) {
-            console.warn('[alertWatcher] email failed', result.error);
-          }
-        } else {
-          console.log('[alertWatcher]', message);
-        }
-      }
-
-      for (const m of Object.keys(insideSince)) {
-        if (!stillInside.has(m)) {
-          delete insideSince[m];
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        upsertServerAlert({
-          ...rule,
-          insideSince,
-          notified,
-          vesselNames,
-          status,
-          triggeredAt,
-          message,
+        const sent = await sendAlertEmail({
+          to: rule.email,
+          subject: `SvalMap alert: ${rule.areaLabel}`,
+          text: `${hit.message}\n\nMMSI: ${hit.mmsi}\nRule: ${rule.id}\nTime: ${hit.at}\n`,
         });
+        if (!sent.ok) {
+          console.warn('[alertWatcher] email failed', sent.error);
+          result.rule.lastEmailError = sent.error || 'Email failed';
+        }
       }
+      if (result.changed) upsertServerAlert(result.rule as ServerAlertRule);
     }
   }
 

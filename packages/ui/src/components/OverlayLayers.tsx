@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useMap } from '../hooks/useMap';
 import { mapStyleReady, safeGetLayer } from '../utils/mapSafe';
+import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 
 export type OverlayVisibility = {
   'eez-norway': boolean;
@@ -165,15 +166,35 @@ const TG_LANDINGS_FILE = 'cable-landings-telegeography-norway.geojson';
 const SEASCAPE_BASE = 'https://tiles.openwaters.io/seascape';
 const BATHY_DEM_SOURCE = 'overlay-bathymetry-dem';
 const BATHY_VEC_SOURCE = 'overlay-bathymetry-vector';
+/** Basemap DEM (svalmap-dark.json `terrain`); added here if a style lacks it. */
+const TERRAIN_SOURCE = 'terrain';
+const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+/** NRK-style land shadows in the basemap — replaced by the seabed relief while it is on. */
+const BASEMAP_HILLSHADE = 'hillshade-land';
+/**
+ * Kartverket "Sjøkart – Dybdedata" WMS: charted contours with depth labels (from ~z14)
+ * and soundings / shoals (from ~z15) in Norwegian waters. The service only draws
+ * them at large scales, so the layer starts where Open Waters steps back.
+ */
+const KV_DEPTH_SOURCE = 'overlay-bathymetry-kartverket';
+const KV_DEPTH_MINZOOM = 13.5;
+const KV_DEPTH_TILES =
+  'https://wms.geonorge.no/skwms1/wms.dybdedata2?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+  '&LAYERS=Dybdekontur,Dybdepunkt,grunne,skjaer_punkt&STYLES=&CRS=EPSG:3857' +
+  '&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true';
 const BATHY_LAYER_IDS = [
+  'overlay-bathymetry-relief',
   'overlay-bathymetry-contours',
   'overlay-bathymetry-labels',
+  'overlay-bathymetry-soundings',
+  'overlay-bathymetry-kartverket',
 ] as const;
 
 /**
- * Contours only (no depare fills / hillshade).
- * Semi-transparent vector fills and raster-dem hillshade both draw tile-grid
- * seams (straight vertical/horizontal lines) in MapLibre — avoid them here.
+ * Seabed relief = MapLibre hillshade over the AWS terrarium DEM (ETOPO / GEBCO-derived
+ * depths at sea), drawn just above the water fill. Open Waters supplies contours,
+ * depth labels and soundings. Its depth-area fills are still left out: semi-transparent
+ * vector fills draw tile-grid seams in MapLibre.
  */
 const BATHY_IS_MAJOR: any = [
   '==',
@@ -210,6 +231,11 @@ const BATHY_LINE_OPACITY: any = [
   0.6,
   10,
   0.75,
+  // Kartverket's charted contours take over near the coast
+  KV_DEPTH_MINZOOM,
+  0.75,
+  KV_DEPTH_MINZOOM + 1,
+  0.25,
 ];
 
 /** Depth labels — thin at z6 (500 m majors), denser from z8. */
@@ -265,7 +291,7 @@ const BATHY_LABEL_HALO = 'rgba(8, 15, 24, 0.85)';
 function applyBathymetryPaint(map: {
   setPaintProperty: (id: string, prop: string, value: unknown) => void;
   setLayoutProperty: (id: string, prop: string, value: unknown) => void;
-  setFilter: (id: string, filter: unknown) => void;
+  setFilter: (id: string, filter: any) => unknown;
   getLayer: (id: string) => unknown;
 }) {
   if (map.getLayer('overlay-bathymetry-contours')) {
@@ -303,6 +329,26 @@ function beforeIdForBathymetry(map: {
   if (overlay) return overlay.id;
   const symbol = layers.find((l) => l.type === 'symbol');
   return symbol?.id;
+}
+
+/** Directly above the basemap water fill, so the relief shades the sea under roads and labels. */
+function beforeIdForSeabedRelief(map: {
+  getStyle: () => { layers?: { id: string; type: string }[] } | undefined;
+}): string | undefined {
+  const layers = map.getStyle()?.layers || [];
+  const water = layers.findIndex((l) => l.id === 'water-fill');
+  if (water >= 0 && layers[water + 1]) return layers[water + 1].id;
+  return beforeIdForBathymetry(map);
+}
+
+/** The seabed relief also shades land, so the basemap's land shadows step aside while it is on. */
+function syncBasemapHillshade(map: any, bathymetryOn: boolean) {
+  if (!safeGetLayer(map, BASEMAP_HILLSHADE)) return;
+  try {
+    map.setLayoutProperty(BASEMAP_HILLSHADE, 'visibility', bathymetryOn ? 'none' : 'visible');
+  } catch {
+    /* ignore */
+  }
 }
 
 function vis(visible: boolean): 'visible' | 'none' {
@@ -475,7 +521,8 @@ export default function OverlayLayers({
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to load ${def.file}: ${res.status}`);
         const data = await res.json();
-        if (cancelled) return;
+        // boot() runs on both load and idle — another call may have added it meanwhile
+        if (cancelled || map.getSource(sourceId)) return;
 
         map.addSource(sourceId, { type: 'geojson', data });
 
@@ -575,7 +622,8 @@ export default function OverlayLayers({
         const res = await fetch(`${apiBase}/overlays/${def.boundaryFile}`);
         if (!res.ok) throw new Error(`Failed to load ${def.boundaryFile}: ${res.status}`);
         const data = await res.json();
-        if (cancelled) return;
+        // boot() runs on both load and idle — another call may have added it meanwhile
+        if (cancelled || map.getSource(bId)) return;
         map.addSource(bId, { type: 'geojson', data });
         map.addLayer({
           id: `${bId}-line`,
@@ -601,7 +649,8 @@ export default function OverlayLayers({
       const res = await fetch(`${apiBase}/overlays/${PETROLEUM_POINTS_FILE}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (cancelled) return;
+      // boot() runs on both load and idle — another call may have added it meanwhile
+      if (cancelled || map.getSource(sourceId)) return;
       map.addSource(sourceId, { type: 'geojson', data });
       map.addLayer({
         id: `${sourceId}-circle`,
@@ -653,12 +702,44 @@ export default function OverlayLayers({
           }
         }
       }
+      // Older builds added their own DEM here; the relief now shares the basemap terrain
       if (map.getSource(BATHY_DEM_SOURCE)) {
         try {
           map.removeSource(BATHY_DEM_SOURCE);
         } catch {
           /* ignore */
         }
+      }
+
+      if (!map.getSource(TERRAIN_SOURCE)) {
+        map.addSource(TERRAIN_SOURCE, {
+          type: 'raster-dem',
+          tiles: [TERRAIN_TILES],
+          encoding: 'terrarium',
+          tileSize: 256,
+          maxzoom: 12,
+          attribution:
+            'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Mapzen / AWS Terrain Tiles</a>',
+        } as any);
+      }
+
+      if (!safeGetLayer(map, 'overlay-bathymetry-relief')) {
+        map.addLayer(
+          {
+            id: 'overlay-bathymetry-relief',
+            type: 'hillshade',
+            source: TERRAIN_SOURCE,
+            layout: { visibility: v },
+            paint: {
+              'hillshade-illumination-direction': 315,
+              'hillshade-shadow-color': 'rgba(0, 4, 12, 0.9)',
+              'hillshade-highlight-color': 'rgba(120, 160, 200, 0.35)',
+              'hillshade-accent-color': 'rgba(0, 0, 0, 0.3)',
+              'hillshade-exaggeration': ['interpolate', ['linear'], ['zoom'], 2, 0.75, 8, 0.6, 12, 0.45],
+            },
+          } as any,
+          beforeIdForSeabedRelief(map)
+        );
       }
 
       if (!map.getSource(BATHY_VEC_SOURCE)) {
@@ -678,7 +759,8 @@ export default function OverlayLayers({
             source: BATHY_VEC_SOURCE,
             'source-layer': 'contours',
             filter: ['!=', ['get', 'sys'], 'ft'],
-            minzoom: 3,
+            // Open Waters tiles start at z4; below that the relief carries the seabed
+            minzoom: 4,
             layout: {
               visibility: v,
               'line-cap': 'round',
@@ -703,6 +785,7 @@ export default function OverlayLayers({
             'source-layer': 'contours',
             filter: BATHY_LABEL_FILTER,
             minzoom: 6,
+            maxzoom: KV_DEPTH_MINZOOM + 0.5,
             layout: {
               visibility: v,
               'symbol-placement': 'line',
@@ -717,7 +800,7 @@ export default function OverlayLayers({
                   ],
                 ],
               ],
-              'text-font': ['NRK Sans Medium', 'Arial Unicode MS Regular'],
+              'text-font': MAP_FONT_BOLD,
               'text-size': BATHY_LABEL_SIZE,
               'text-max-angle': 30,
               'text-padding': 28,
@@ -745,6 +828,76 @@ export default function OverlayLayers({
         );
       }
 
+      if (!safeGetLayer(map, 'overlay-bathymetry-soundings')) {
+        map.addLayer(
+          {
+            id: 'overlay-bathymetry-soundings',
+            type: 'symbol',
+            source: BATHY_VEC_SOURCE,
+            'source-layer': 'soundings',
+            minzoom: 9,
+            maxzoom: KV_DEPTH_MINZOOM + 0.5,
+            layout: {
+              visibility: v,
+              'text-field': [
+                'to-string',
+                ['round', ['abs', ['to-number', ['get', 'depth_m'], 0]]],
+              ],
+              'text-font': MAP_FONT_REGULAR,
+              'text-size': ['interpolate', ['linear'], ['zoom'], 9, 9, 13, 11],
+              'text-padding': 6,
+              'text-allow-overlap': false,
+            },
+            paint: {
+              'text-color': '#7f9bb5',
+              'text-halo-color': BATHY_LABEL_HALO,
+              'text-halo-width': 1,
+            },
+          } as any,
+          beforeId
+        );
+      }
+
+      if (!map.getSource(KV_DEPTH_SOURCE)) {
+        map.addSource(KV_DEPTH_SOURCE, {
+          type: 'raster',
+          tiles: [KV_DEPTH_TILES],
+          tileSize: 256,
+          minzoom: 13,
+          maxzoom: 18,
+          attribution: '© <a href="https://kartverket.no">Kartverket</a> (Sjøkart – Dybdedata)',
+        } as any);
+      }
+      if (!safeGetLayer(map, 'overlay-bathymetry-kartverket')) {
+        map.addLayer(
+          {
+            id: 'overlay-bathymetry-kartverket',
+            type: 'raster',
+            source: KV_DEPTH_SOURCE,
+            minzoom: KV_DEPTH_MINZOOM,
+            layout: { visibility: v },
+            paint: {
+              'raster-opacity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                KV_DEPTH_MINZOOM,
+                0,
+                KV_DEPTH_MINZOOM + 0.5,
+                0.9,
+              ],
+              // Chart symbology is dark ink with white halos on paper; min > max inverts it
+              // for the night map (light ink, dark halos)
+              'raster-brightness-min': 0.85,
+              'raster-brightness-max': 0.15,
+              'raster-saturation': -1,
+            },
+          } as any,
+          beforeId
+        );
+      }
+
+      syncBasemapHillshade(map, visibility.bathymetry);
       applyBathymetryPaint(map);
     }
 
@@ -754,7 +907,8 @@ export default function OverlayLayers({
       const res = await fetch(`${apiBase}/overlays/${TG_LANDINGS_FILE}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (cancelled) return;
+      // boot() runs on both load and idle — another call may have added it meanwhile
+      if (cancelled || map.getSource(sourceId)) return;
       map.addSource(sourceId, { type: 'geojson', data });
       map.addLayer({
         id: `${sourceId}-circle`,
@@ -777,6 +931,7 @@ export default function OverlayLayers({
         layout: {
           visibility: vis(visibility['cables-telegeography']),
           'text-field': ['get', 'name'],
+          'text-font': MAP_FONT_REGULAR,
           'text-size': 10,
           'text-offset': [0, 1.1],
           'text-anchor': 'top',
@@ -1060,6 +1215,7 @@ export default function OverlayLayers({
         map.setLayoutProperty(lid, 'visibility', bathyVis);
       }
     }
+    syncBasemapHillshade(map, visibility.bathymetry);
     if (visibility.bathymetry) {
       try {
         applyBathymetryPaint(map);

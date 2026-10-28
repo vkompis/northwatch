@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from 'react';
 import { useMap } from '../hooks/useMap';
 import axios from 'axios';
 import { mapStyleReady, safeGetLayer, safeGetSource } from '../utils/mapSafe';
+import { MAP_FONT_REGULAR } from '../utils/mapFonts';
 
 export type NavWarningProps = {
   kind: 'navarea' | 'coastal' | string;
@@ -193,10 +194,10 @@ export default function IncidentLayer({
             id: `${id}-label`,
             type: 'symbol',
             source: id,
-            filter: buildLayerFilter(`${id}-label`, null),
             layout: {
               visibility: 'none',
               'text-field': ['get', 'title'],
+              'text-font': MAP_FONT_REGULAR,
               'text-size': 11,
               'text-offset': [0, 1.2],
               'text-anchor': 'top',

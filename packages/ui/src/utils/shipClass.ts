@@ -1,4 +1,8 @@
-/** Map AIS shipType / shipTypeCode → coarse filter buckets (NAIS-style). */
+/**
+ * Map AIS shipType / shipTypeCode → coarse filter buckets (NAIS-style).
+ * Military / law enforcement is a marker category (see vesselCategory), not a type bucket.
+ * `device` is assigned by MMSI heuristics (buoys, beacons), never from the AIS type.
+ */
 
 export const SHIP_CLASS_KEYS = [
   'fishing',
@@ -8,9 +12,9 @@ export const SHIP_CLASS_KEYS = [
   'pleasure',
   'hsc',
   'tugWork',
-  'militaryAis',
   'other',
   'unknown',
+  'device',
 ] as const;
 
 export type ShipClass = (typeof SHIP_CLASS_KEYS)[number];
@@ -23,9 +27,9 @@ export const SHIP_CLASS_LABELS: Record<ShipClass, string> = {
   pleasure: 'Pleasure / sailing',
   hsc: 'High-speed craft',
   tugWork: 'Tug / pilot / work',
-  militaryAis: 'Military / law',
   other: 'Other',
   unknown: 'Unknown type',
+  device: 'Buoys & AIS devices',
 };
 
 function fromCode(n: number): ShipClass | null {
@@ -33,7 +37,6 @@ function fromCode(n: number): ShipClass | null {
   if (n === 30) return 'fishing';
   if (n === 36 || n === 37) return 'pleasure';
   if (n >= 40 && n <= 49) return 'hsc';
-  if (n === 35 || n === 55 || n === 59) return 'militaryAis';
   if (
     n === 31 ||
     n === 32 ||
@@ -66,13 +69,6 @@ function fromLabel(raw: string): ShipClass {
   if (s.includes('passenger')) return 'passenger';
   if (s.includes('pleasure') || s.includes('sailing')) return 'pleasure';
   if (s.includes('high speed') || s.startsWith('hsc')) return 'hsc';
-  if (
-    s.includes('military') ||
-    s.includes('law enforcement') ||
-    s.includes('noncombatant')
-  ) {
-    return 'militaryAis';
-  }
   if (
     s.includes('tug') ||
     s.includes('tow') ||

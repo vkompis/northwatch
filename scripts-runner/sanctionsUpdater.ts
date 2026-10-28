@@ -329,7 +329,15 @@ export async function updateOpenSanctionsVessels(euImos: Set<string>): Promise<{
   };
 }
 
-export function readOpenSanctionsVesselIds(filePath = OPENSANCTIONS_VESSELS_CSV): {
+/**
+ * IMO / MMSI ids from the local OpenSanctions subset.
+ * `sanction` = listed under a sanctions programme; `shadow` = OpenSanctions'
+ * `mare.shadow` tag (sourced from the GUR war-sanctions shadow-fleet list, updated daily).
+ */
+export function readOpenSanctionsVesselIds(
+  filePath = OPENSANCTIONS_VESSELS_CSV,
+  risk: 'sanction' | 'shadow' = 'sanction'
+): {
   imos: Set<string>;
   mmsis: Set<string>;
 } {
@@ -341,8 +349,7 @@ export function readOpenSanctionsVesselIds(filePath = OPENSANCTIONS_VESSELS_CSV)
   if (lines.length < 2) return { imos, mmsis };
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCsvLine(lines[i]);
-    const risk = (cols[3] || '').toLowerCase();
-    if (!risk.includes('sanction')) continue;
+    if (!(cols[3] || '').toLowerCase().includes(risk)) continue;
     const imo = parseImo(cols[0]);
     if (imo) imos.add(imo);
     const mmsi = String(cols[1] || '').match(/\d{9}/);

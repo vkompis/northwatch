@@ -9,6 +9,7 @@ import {
   type AlertPolygon,
   type AreaAlertRule,
   createAlertRule,
+  evaluateAlertRule,
   loadAlertRules,
   parseMmsiList,
   ruleWatchSummary,
@@ -56,6 +57,7 @@ export default function AlertPanel({
   const [watchHours, setWatchHours] = useState(24);
   const [email, setEmail] = useState('');
   const [smtpHint, setSmtpHint] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const areaCache = useRef<Record<string, any>>({});
   const rulesRef = useRef(rules);
   rulesRef.current = rules;
@@ -141,7 +143,7 @@ export default function AlertPanel({
 
     async function tick() {
       const current = rulesRef.current;
-      const watching = current.filter((r) => r.status === 'watching');
+      const watching = current.filter((r) => r.status !== 'expired');
       if (!watching.length) return;
 
       let positions: any[] = [];
@@ -153,27 +155,14 @@ export default function AlertPanel({
       }
       if (cancelled) return;
 
-      const now = Date.now();
       let changed = false;
       const next: AreaAlertRule[] = [];
 
       for (const rule of current) {
-        if (rule.status !== 'watching') {
+        if (rule.status === 'expired') {
           next.push(rule);
           continue;
         }
-
-        const expires = new Date(rule.createdAt).getTime() + rule.watchHours * 3600_000;
-        if (now > expires) {
-          changed = true;
-          next.push({
-            ...rule,
-            status: 'expired',
-            message: `Watch ended (${rule.watchHours}h)`,
-          });
-          continue;
-        }
-
         let gj: any;
         try {
           gj = await loadArea(rule);
@@ -181,94 +170,19 @@ export default function AlertPanel({
           next.push(rule);
           continue;
         }
-
-        const candidates =
-          rule.mmsis.length === 0
-            ? positions
-            : positions.filter((v) => {
-                const m = String(v.mmsi ?? '').replace(/\D/g, '').padStart(9, '0').slice(-9);
-                return rule.mmsis.includes(m);
-              });
-
-        const insideSince = { ...rule.insideSince };
-        const notified = [...rule.notified];
-        let message = rule.message;
-        let status: AreaAlertRule['status'] = rule.status;
-        let triggeredAt = rule.triggeredAt;
-        let lastEmailError = rule.lastEmailError;
-        const vesselNames = { ...rule.vesselNames };
-
-        const stillInside = new Set<string>();
-
-        for (const v of candidates) {
-          const mmsi = String(v.mmsi ?? '').replace(/\D/g, '').padStart(9, '0').slice(-9);
-          if (!mmsi) continue;
-          const lon = Number(v.lon ?? v.longitude);
-          const lat = Number(v.lat ?? v.latitude);
-          if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-          if (!pointInGeoJSON(lon, lat, gj)) continue;
-
-          stillInside.add(mmsi);
-          if (v.vessel_name || v.name) {
-            vesselNames[mmsi] = String(v.vessel_name || v.name);
-          }
-          if (!insideSince[mmsi]) {
-            insideSince[mmsi] = new Date().toISOString();
-            changed = true;
-          }
-
-          const dwellMs = now - new Date(insideSince[mmsi]).getTime();
-          const needMs = rule.dwellMinutes * 60_000;
-          if (dwellMs < needMs) continue;
-          if (notified.includes(mmsi)) continue;
-
-          notified.push(mmsi);
-          status = 'triggered';
-          triggeredAt = new Date().toISOString();
-          const name = vesselNames[mmsi] || `MMSI ${mmsi}`;
-          message = `${name} entered ${rule.areaLabel}${
-            rule.dwellMinutes > 0 ? ` (≥${rule.dwellMinutes} min)` : ''
-          }`;
-          changed = true;
-
+        // Email is sent by the scripts-runner watcher (rule is synced there) — only notify locally
+        const result = evaluateAlertRule(rule, positions, (lon, lat) => pointInGeoJSON(lon, lat, gj));
+        for (const hit of result.hits) {
           try {
             if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-              new Notification('SvalMap area alert', { body: message });
+              new Notification('SvalMap area alert', { body: hit.message });
             }
           } catch {
             /* ignore */
           }
-
-          if (rule.email) {
-            try {
-              await axios.post(
-                `${apiBase}/api/alerts/notify`,
-                { ruleId: rule.id, mmsi, message, email: rule.email, rule },
-                { timeout: 20000 }
-              );
-            } catch (e: any) {
-              lastEmailError = e?.response?.data?.error || e?.message || 'Email failed';
-            }
-          }
         }
-
-        for (const m of Object.keys(insideSince)) {
-          if (!stillInside.has(m)) {
-            delete insideSince[m];
-            changed = true;
-          }
-        }
-
-        next.push({
-          ...rule,
-          insideSince,
-          notified,
-          vesselNames,
-          status,
-          triggeredAt,
-          message,
-          lastEmailError,
-        });
+        if (result.changed) changed = true;
+        next.push(result.rule);
       }
 
       if (!cancelled && changed) setRules(next);
@@ -282,11 +196,8 @@ export default function AlertPanel({
     };
   }, [apiBase, loadArea, ready]);
 
-  const active = useMemo(
-    () => rules.filter((r) => r.status === 'watching' || r.status === 'triggered'),
-    [rules]
-  );
-  const triggered = useMemo(() => rules.filter((r) => r.status === 'triggered'), [rules]);
+  const active = useMemo(() => rules.filter((r) => r.status !== 'expired'), [rules]);
+  const hitCount = useMemo(() => active.reduce((n, r) => n + r.hits.length, 0), [active]);
 
   const finishPolygon = (): AlertPolygon | null => {
     if (draftRing.length < 3) return null;
@@ -296,15 +207,22 @@ export default function AlertPanel({
 
   const addRule = async () => {
     const mmsis = watchAny ? [] : parseMmsiList(mmsiText);
-    if (!watchAny && mmsis.length === 0) return;
+    if (!watchAny && mmsis.length === 0) {
+      setFormError('Enter at least one 9-digit MMSI, or tick "Any ship in the area".');
+      return;
+    }
 
     let polygon: AlertPolygon | null = null;
     let finalArea: AlertAreaId = areaId;
     if (areaId === 'custom' || drawing) {
       polygon = finishPolygon();
-      if (!polygon) return;
+      if (!polygon) {
+        setFormError('Draw the area first: at least 3 corners, then close the shape.');
+        return;
+      }
       finalArea = 'custom';
     }
+    setFormError(null);
 
     const names: Record<string, string> = {};
     if (draftName && mmsis.length === 1) names[mmsis[0]] = draftName;
@@ -345,7 +263,7 @@ export default function AlertPanel({
         onClick={onExpand}
         aria-label="Open alerts"
       >
-        Alerts{triggered.length ? ` (${triggered.length})` : ''}
+        Alerts{hitCount ? ` (${hitCount})` : ''}
       </button>
     );
   }
@@ -355,10 +273,21 @@ export default function AlertPanel({
       <div className="alert-panel-header">
         <div className="alert-panel-title">
           Alerts
-          {triggered.length > 0 ? <span className="alert-badge">{triggered.length}</span> : null}
+          {hitCount > 0 ? <span className="alert-badge">{hitCount}</span> : null}
         </div>
         <div className="alert-panel-actions">
-          <button type="button" className="alert-link" onClick={() => setFormOpen((v) => !v)}>
+          <button
+            type="button"
+            className="alert-link"
+            onClick={() => {
+              if (formOpen) {
+                onDrawingChange(false);
+                onDraftRingChange([]);
+                setFormError(null);
+              }
+              setFormOpen((v) => !v);
+            }}
+          >
             {formOpen ? 'Cancel' : 'New'}
           </button>
           {onCollapse && (
@@ -410,37 +339,70 @@ export default function AlertPanel({
           </label>
           {(areaId === 'custom' || drawing) && (
             <div className="alert-draw-tools">
-              <button
-                type="button"
-                className="alert-primary secondary"
-                onClick={() => {
-                  setAreaId('custom');
-                  onDrawingChange(true);
-                }}
-              >
-                {drawing ? 'Drawing… click map' : 'Start drawing'}
-              </button>
-              <button
-                type="button"
-                className="alert-link"
-                onClick={() => onDraftRingChange(draftRing.slice(0, -1))}
-                disabled={!draftRing.length}
-              >
-                Undo point
-              </button>
-              <button
-                type="button"
-                className="alert-link"
-                onClick={() => onDraftRingChange([])}
-                disabled={!draftRing.length}
-              >
-                Clear
-              </button>
-              <span className="alert-help">
-                {draftRing.length} points
-                {draftRing.length < 3 ? ' (need ≥3)' : ' — ready'}. Pan is paused while drawing —
-                click the map to place corners.
-              </span>
+              {drawing ? (
+                <>
+                  <span className="alert-help strong">
+                    Drawing — {draftRing.length} corner{draftRing.length === 1 ? '' : 's'}.{' '}
+                    {draftRing.length < 3
+                      ? 'Click the map to add corners (at least 3).'
+                      : 'Click the green first corner, double-click or press Enter to close.'}
+                  </span>
+                  <button
+                    type="button"
+                    className="alert-primary secondary"
+                    onClick={() => onDrawingChange(false)}
+                    disabled={draftRing.length < 3}
+                  >
+                    Finish area
+                  </button>
+                  <button
+                    type="button"
+                    className="alert-link"
+                    onClick={() => onDraftRingChange(draftRing.slice(0, -1))}
+                    disabled={!draftRing.length}
+                  >
+                    Undo corner
+                  </button>
+                  <button
+                    type="button"
+                    className="alert-link"
+                    onClick={() => {
+                      onDraftRingChange([]);
+                      onDrawingChange(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : draftRing.length >= 3 ? (
+                <>
+                  <span className="alert-help strong">
+                    ✓ Area ready ({draftRing.length} corners)
+                  </span>
+                  <button
+                    type="button"
+                    className="alert-link"
+                    onClick={() => {
+                      onDraftRingChange([]);
+                      onDrawingChange(true);
+                    }}
+                  >
+                    Redraw
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="alert-primary secondary"
+                  onClick={() => {
+                    setAreaId('custom');
+                    onDraftRingChange([]);
+                    onDrawingChange(true);
+                  }}
+                >
+                  Draw area on map
+                </button>
+              )}
             </div>
           )}
           <label>
@@ -474,10 +436,19 @@ export default function AlertPanel({
           </label>
           {smtpHint && <p className="alert-help">{smtpHint}</p>}
           <p className="alert-help">
-            Browser checks live AIS ~every 20s while this tab is open. With email + SMTP on the
-            server, the watch is also registered server-side.
+            {watchAny
+              ? 'Alerts when a ship enters — ships already inside when you start are ignored until they leave.'
+              : 'Alerts once per ship when it enters (or right away if it is already inside).'}{' '}
+            The server keeps watching and sends email even when this tab is closed.
           </p>
-          <button type="button" className="alert-primary" onClick={() => addRule()}>
+          {formError && <p className="alert-msg warn">{formError}</p>}
+          <button
+            type="button"
+            className="alert-primary"
+            onClick={() => addRule()}
+            disabled={drawing}
+            title={drawing ? 'Finish the area first' : undefined}
+          >
             Start watching
           </button>
         </div>
@@ -495,15 +466,24 @@ export default function AlertPanel({
           <li key={r.id} className={`alert-item status-${r.status}`}>
             <div className="alert-item-main">
               <strong>{ruleWatchSummary(r)}</strong>
-              {r.status === 'watching' && Object.keys(r.insideSince).length > 0 && (
+              {r.hits.length === 0 && (
                 <span className="alert-progress">
-                  Inside now: {Object.keys(r.insideSince).join(', ')}
+                  {!r.primed
+                    ? 'Starting…'
+                    : r.baseline.length
+                      ? `Waiting for new arrivals (${r.baseline.length} already inside)`
+                      : 'Waiting…'}
                 </span>
               )}
-              {r.status === 'watching' && Object.keys(r.insideSince).length === 0 && (
-                <span className="alert-progress">Waiting…</span>
+              {r.hits.slice(0, 5).map((h) => (
+                <span key={`${h.mmsi}-${h.at}`} className="alert-msg">
+                  {new Date(h.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{' '}
+                  {h.message}
+                </span>
+              ))}
+              {r.hits.length > 5 && (
+                <span className="alert-progress">+{r.hits.length - 5} earlier</span>
               )}
-              {r.message && <span className="alert-msg">{r.message}</span>}
               {r.email && <span className="alert-progress">Email: {r.email}</span>}
               {r.lastEmailError && (
                 <span className="alert-msg warn">{r.lastEmailError}</span>
@@ -516,11 +496,11 @@ export default function AlertPanel({
         ))}
       </ul>
 
-      {rules.some((r) => r.status !== 'watching') && (
+      {rules.some((r) => r.status === 'expired') && (
         <button
           type="button"
           className="alert-link clear"
-          onClick={() => setRules((prev) => prev.filter((r) => r.status === 'watching'))}
+          onClick={() => setRules((prev) => prev.filter((r) => r.status !== 'expired'))}
         >
           Clear finished
         </button>

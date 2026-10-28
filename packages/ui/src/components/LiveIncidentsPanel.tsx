@@ -62,7 +62,10 @@ export default function LiveIncidentsPanel({
 
   return (
     <div className={`live-incidents ${className}`.trim()}>
-      <div className="item hint">Proximity &amp; loiter (live AIS)</div>
+      <div className="item hint">
+        Russian, sanctioned, shadow-fleet &amp; research vessels stopped at sea or meeting
+        another ship (harbours skipped)
+      </div>
       {error && <div className="item hint warn">{error}</div>}
       {!error && !items.length && <div className="item hint">No hits right now</div>}
       <ul className="watchlist-list">

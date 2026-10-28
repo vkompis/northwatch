@@ -6,6 +6,7 @@ export {
   mmsiCategory,
   mmsiFlagCountry,
   countryInfoFromMmsi,
+  isLikelyAisDevice,
   HEADER_COLORS,
   headerTextColor,
   navStatusLabel,
@@ -31,6 +32,8 @@ export {
   ALERT_AREAS,
   ALERTS_STORAGE_KEY,
   createAlertRule,
+  evaluateAlertRule,
+  normalizeRule,
   loadAlertRules,
   saveAlertRules,
   areaLabel,
@@ -42,6 +45,7 @@ export type {
   AreaAlertRule,
   AlertAreaDef,
   AlertPolygon,
+  AlertHit,
 } from './utils/areaAlerts';
 export { pointInGeoJSON, pointInGeometry } from './utils/geo';
 
@@ -59,9 +63,15 @@ export { default as LiveIncidentsPanel } from './components/LiveIncidentsPanel';
 export type { LiveIncident } from './components/LiveIncidentsPanel';
 export {
   DEFAULT_VESSEL_FILTERS,
+  CATEGORY_KEYS,
+  FOCUS_KEYS,
   anyFilterActive,
-  vesselFilterExpression,
+  anyFocusActive,
+  vesselCategoryKey,
+  vesselShipClass,
   vesselPassesFilter,
+  VESSEL_FILTER_PRESETS,
+  sameFilters,
   mergeVesselFilters,
   vesselFiltersToUrlTokens,
   vesselFiltersFromUrlTokens,

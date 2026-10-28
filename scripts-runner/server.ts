@@ -203,6 +203,13 @@ async function ensureShadowLoaded(): Promise<void> {
   try {
     SHADOWFLEET_MMSI = new Set(Array.from(readMmsiCsv(LOCAL_SHADOWFLEET_CSV)).map((x) => String(x)));
     SHADOWFLEET_IMO = new Set(Array.from(readImoCsv(LOCAL_SHADOWFLEET_CSV)).map((x) => String(x)));
+    // shadowfleet2.csv is a one-off GUR export (Aug 2025); OpenSanctions carries the
+    // same GUR list refreshed with the weekly sanctions update
+    if (fs.existsSync(LOCAL_OPENSANCTIONS_VESSELS_CSV)) {
+      const os = readOpenSanctionsVesselIds(LOCAL_OPENSANCTIONS_VESSELS_CSV, 'shadow');
+      os.imos.forEach((m) => SHADOWFLEET_IMO.add(m));
+      os.mmsis.forEach((m) => SHADOWFLEET_MMSI.add(m));
+    }
     SHADOW_CACHE_TS = now;
     console.log(`[shadowfleet] mmsi=${SHADOWFLEET_MMSI.size} imo=${SHADOWFLEET_IMO.size}`);
   } catch (e) {
@@ -1416,6 +1423,13 @@ async function buildLivePositionsList(): Promise<{
       v?.shipName ?? v?.name ?? v?.ShipName ?? v?.properties?.name ?? null;
     const shipTypeRaw =
       v?.shipTypeDesc ?? v?.shipType ?? v?.properties?.shipType ?? null;
+    const lengthRaw = Number(
+      v?.shipLength ??
+        v?.length ??
+        (v?.dimensionA != null && v?.dimensionB != null
+          ? Number(v.dimensionA) + Number(v.dimensionB)
+          : NaN)
+    );
     const normalized = normalizeLiveVessel({
       mmsi: String(v?.mmsi ?? v?.MMSI ?? ''),
       lon,
@@ -1430,6 +1444,8 @@ async function buildLivePositionsList(): Promise<{
       shipType: shipTypeRaw,
       eta: etaRaw,
       timestamp: v?.msgtime ?? v?.msgTime ?? v?.time ?? v?.Timestamp ?? null,
+      // Without length the fishing <15 m / leisure <45 m rule never applied to BW traffic
+      lengthM: Number.isFinite(lengthRaw) && lengthRaw > 0 ? lengthRaw : null,
       source: 'barentswatch',
     });
     if (!normalized) continue;
@@ -1438,9 +1454,22 @@ async function buildLivePositionsList(): Promise<{
       byMmsi.set(normalized.mmsi, normalized);
       continue;
     }
+    // AISStream used to win unconditionally, even with a fix up to 45 min older than BW's
+    const bwTime = Date.parse(String(normalized.timestamp ?? ''));
+    const aisTime = Date.parse(String(existing.timestamp ?? ''));
+    const fix = Number.isFinite(bwTime) && (!Number.isFinite(aisTime) || bwTime > aisTime)
+      ? normalized
+      : existing;
     byMmsi.set(normalized.mmsi, {
       ...normalized,
       ...existing,
+      lon: fix.lon,
+      lat: fix.lat,
+      speed: fix.speed,
+      course: fix.course,
+      heading: fix.heading,
+      status: fix.status ?? existing.status ?? normalized.status,
+      timestamp: fix.timestamp,
       vessel_name: existing.vessel_name || normalized.vessel_name,
       destination: existing.destination || normalized.destination,
       imo: existing.imo || normalized.imo,
@@ -1534,7 +1563,7 @@ app.get('/api/sanctions/lookup', async (req, res) => {
         sanctionedImo || sanctionedMmsi
           ? 'Local EU designated / OpenSanctions vessel lists (CSV cache)'
           : null,
-        shadowMmsi || shadowImo ? 'Local shadow-fleet CSV' : null,
+        shadowMmsi || shadowImo ? 'GUR shadow-fleet list (local CSV + OpenSanctions)' : null,
       ].filter(Boolean),
       listMeta: {
         euImoCount: readEuDesignatedCsv().size,
@@ -1556,67 +1585,165 @@ app.get('/api/sanctions/lookup', async (req, res) => {
   }
 });
 
-/** Free live heuristics: proximity & slow loiter among vessels of interest. */
+/**
+ * Ports where a stopped vessel is just in harbour. Norwegian port facilities come from
+ * ports.geojson; this covers the main non-Norwegian harbours inside the AIS box.
+ */
+const EXTRA_PORTS: { name: string; lon: number; lat: number; radiusNm: number }[] = [
+  { name: 'Murmansk', lon: 33.06, lat: 68.97, radiusNm: 8 },
+  { name: 'Severomorsk', lon: 33.42, lat: 69.07, radiusNm: 5 },
+  { name: 'Polyarny', lon: 33.45, lat: 69.2, radiusNm: 4 },
+  { name: 'Arkhangelsk', lon: 40.52, lat: 64.55, radiusNm: 10 },
+  { name: 'Severodvinsk', lon: 39.82, lat: 64.57, radiusNm: 6 },
+  { name: 'Kandalaksha', lon: 32.4, lat: 67.15, radiusNm: 5 },
+  { name: 'St Petersburg', lon: 30.2, lat: 59.9, radiusNm: 12 },
+  { name: 'Kronstadt', lon: 29.77, lat: 59.99, radiusNm: 4 },
+  { name: 'Ust-Luga', lon: 28.4, lat: 59.68, radiusNm: 5 },
+  { name: 'Primorsk', lon: 28.67, lat: 60.35, radiusNm: 4 },
+  { name: 'Vysotsk', lon: 28.57, lat: 60.63, radiusNm: 4 },
+  { name: 'Kaliningrad', lon: 20.45, lat: 54.7, radiusNm: 6 },
+  { name: 'Baltiysk', lon: 19.9, lat: 54.65, radiusNm: 4 },
+  { name: 'Kiel', lon: 10.15, lat: 54.35, radiusNm: 5 },
+  { name: 'Rostock', lon: 12.1, lat: 54.15, radiusNm: 5 },
+  { name: 'Gdansk / Gdynia', lon: 18.6, lat: 54.45, radiusNm: 8 },
+  { name: 'Copenhagen', lon: 12.6, lat: 55.7, radiusNm: 5 },
+  { name: 'Gothenburg', lon: 11.85, lat: 57.69, radiusNm: 5 },
+  { name: 'Helsinki', lon: 24.95, lat: 60.15, radiusNm: 5 },
+  { name: 'Tallinn', lon: 24.75, lat: 59.45, radiusNm: 5 },
+  { name: 'Riga', lon: 24.1, lat: 57.0, radiusNm: 6 },
+  { name: 'Reykjavik', lon: -21.93, lat: 64.15, radiusNm: 4 },
+  { name: 'Tórshavn', lon: -6.77, lat: 62.0, radiusNm: 3 },
+  { name: 'Lerwick', lon: -1.14, lat: 60.16, radiusNm: 3 },
+  { name: 'Aberdeen', lon: -2.07, lat: 57.14, radiusNm: 3 },
+];
+const PORT_RADIUS_NM = 1.5;
+const RENDEZVOUS_MAX_KN = 3;
+const HEURISTIC_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+
+let HEURISTIC_PORTS: { lon: number; lat: number; radiusNm: number }[] | null = null;
+function heuristicPorts() {
+  if (HEURISTIC_PORTS) return HEURISTIC_PORTS;
+  const out = EXTRA_PORTS.map(({ lon, lat, radiusNm }) => ({ lon, lat, radiusNm }));
+  try {
+    const gj = JSON.parse(fs.readFileSync(path.join(dataSource('overlays'), 'ports.geojson'), 'utf8'));
+    for (const f of gj.features || []) {
+      const c = f?.geometry?.coordinates;
+      if (Array.isArray(c) && c.length >= 2) {
+        out.push({ lon: Number(c[0]), lat: Number(c[1]), radiusNm: PORT_RADIUS_NM });
+      }
+    }
+  } catch {
+    /* ports overlay missing — extra list only */
+  }
+  HEURISTIC_PORTS = out;
+  return out;
+}
+
+/** Fast equirectangular distance — plenty for sub-10 nm checks. */
+function approxNm(aLon: number, aLat: number, bLon: number, bLat: number): number {
+  const dLat = (bLat - aLat) * 60;
+  const dLon = (bLon - aLon) * 60 * Math.cos(((aLat + bLat) / 2) * (Math.PI / 180));
+  return Math.hypot(dLat, dLon);
+}
+
+function inHarbour(v: any): boolean {
+  if (Number(v.status) === 5) return true; // moored
+  return heuristicPorts().some((p) => approxNm(v.lon, v.lat, p.lon, p.lat) <= p.radiusNm);
+}
+
+/** Why a vessel is worth watching, most serious first; null = not a subject. */
+function interestReason(v: any): { rank: number; label: string } | null {
+  if (v.shadowfleet) return { rank: 0, label: 'shadow fleet' };
+  if (v.sanctioned) return { rank: 1, label: 'sanctioned' };
+  if (v.research) return { rank: 2, label: 'RU research' };
+  if (String(v.mmsi).startsWith('273')) {
+    return /fish/i.test(String(v.shipType || ''))
+      ? { rank: 4, label: 'RU fishing' }
+      : { rank: 3, label: 'Russian' };
+  }
+  return null;
+}
+
+/**
+ * Free live heuristics around Russian, sanctioned, shadow-fleet and research vessels:
+ * slow / stopped at sea (loiter) and slow close approaches to any other vessel
+ * (possible rendezvous / STS). Vessels in harbour, moored or with stale fixes are skipped.
+ */
 app.get('/api/incidents/live', async (req, res) => {
   try {
     const proxNm = Math.max(0.2, Math.min(10, parseFloat(String(req.query.nm || '1')) || 1));
     const loiterKn = Math.max(0.1, Math.min(3, parseFloat(String(req.query.loiter || '0.8')) || 0.8));
     const list = await getLivePositionsList();
-    const ofInterest = (v: any) =>
-      !!(v.sanctioned || v.shadowfleet || v.research || String(v.mmsi).startsWith('273'));
-    // Proximity: at least one vessel must be RU / research / sanctioned / shadow (skip pure military pairs)
-    const interest = list.filter((v) => ofInterest(v) || v.military);
+    const now = Date.now();
+    const fresh = (v: any) => {
+      const t = Date.parse(String(v.timestamp ?? ''));
+      return Number.isFinite(t) && now - t <= HEURISTIC_MAX_AGE_MS;
+    };
+    const atSea = list.filter(
+      (v) => Number.isFinite(v.lon) && Number.isFinite(v.lat) && fresh(v) && !inHarbour(v)
+    );
+    const subjects = atSea
+      .map((v) => ({ v, why: interestReason(v) }))
+      .filter((x): x is { v: any; why: { rank: number; label: string } } => !!x.why);
+    const slow = (v: any) => {
+      const spd = Number(v.speed);
+      return Number.isFinite(spd) && spd <= RENDEZVOUS_MAX_KN;
+    };
+    const name = (v: any) => v.vessel_name || v.mmsi;
     const incidents: any[] = [];
+    const seenPairs = new Set<string>();
 
-    for (let i = 0; i < interest.length; i++) {
-      for (let j = i + 1; j < interest.length; j++) {
-        const a = interest[i];
-        const b = interest[j];
-        if (!ofInterest(a) && !ofInterest(b)) continue;
-        const from = turf.point([a.lon, a.lat]);
-        const to = turf.point([b.lon, b.lat]);
-        const km = turf.distance(from, to, { units: 'kilometers' });
-        const nm = km / 1.852;
-        if (nm <= proxNm) {
-          incidents.push({
-            id: `prox-${a.mmsi}-${b.mmsi}`,
-            type: 'proximity',
-            title: 'Close approach',
-            message: `${a.vessel_name || a.mmsi} ↔ ${b.vessel_name || b.mmsi} · ${nm.toFixed(2)} nm`,
-            mmsi: [a.mmsi, b.mmsi],
-            lon: (a.lon + b.lon) / 2,
-            lat: (a.lat + b.lat) / 2,
-            distanceNm: Math.round(nm * 100) / 100,
-          });
-        }
+    for (const { v: a, why } of subjects) {
+      if (!slow(a)) continue;
+      for (const b of atSea) {
+        if (b === a || !slow(b)) continue;
+        const nm = approxNm(a.lon, a.lat, b.lon, b.lat);
+        if (nm > proxNm) continue;
+        const key = [a.mmsi, b.mmsi].sort().join('-');
+        if (seenPairs.has(key)) continue;
+        seenPairs.add(key);
+        const bWhy = interestReason(b);
+        incidents.push({
+          id: `prox-${key}`,
+          type: 'proximity',
+          title: `Possible rendezvous · ${why.label}`,
+          message: `${name(a)} ↔ ${name(b)}${bWhy ? ` (${bWhy.label})` : ''} · ${nm.toFixed(2)} nm`,
+          mmsi: [a.mmsi, b.mmsi],
+          lon: (a.lon + b.lon) / 2,
+          lat: (a.lat + b.lat) / 2,
+          distanceNm: Math.round(nm * 100) / 100,
+          rank: Math.min(why.rank, bWhy?.rank ?? 9),
+        });
       }
     }
 
-    for (const v of interest) {
-      if (!ofInterest(v) && !v.military) continue;
+    for (const { v, why } of subjects) {
       const spd = Number(v.speed);
       if (!Number.isFinite(spd) || spd > loiterKn) continue;
       incidents.push({
         id: `loiter-${v.mmsi}`,
         type: 'loiter',
-        title: 'Slow / loitering',
-        message: `${v.vessel_name || v.mmsi} · ${spd.toFixed(1)} kn`,
+        title: `Stopped at sea · ${why.label}`,
+        message: `${name(v)} · ${spd.toFixed(1)} kn`,
         mmsi: [v.mmsi],
         lon: v.lon,
         lat: v.lat,
         speed: spd,
+        rank: why.rank,
       });
     }
 
-    incidents.sort((a, b) => (a.distanceNm ?? 99) - (b.distanceNm ?? 99));
+    // Most serious vessel first, then closest approach
+    incidents.sort((a, b) => a.rank - b.rank || (a.distanceNm ?? 99) - (b.distanceNm ?? 99));
     res.json({
       incidents: incidents.slice(0, 40),
       meta: {
-        interestCount: interest.length,
+        interestCount: subjects.length,
         liveCount: list.length,
         proxNm,
         loiterKn,
-        note: 'Heuristic only — not GFW or BQ detector output.',
+        note:
+          'Heuristic only — Russian / sanctioned / shadow / research vessels at sea; harbours, moored and >3 h old fixes skipped.',
       },
     });
   } catch (e: any) {
@@ -3381,7 +3508,8 @@ app.listen(PORT, () => {
     console.log(`[sanctions] refresh (${reason})…`);
     const result = await updateEuDesignatedVessels();
     SANCTIONED_CACHE_TS = 0;
-    await ensureSanctionedLoaded();
+    SHADOW_CACHE_TS = 0;
+    await Promise.all([ensureSanctionedLoaded(), ensureShadowLoaded()]);
     console.log(
       `[sanctions] refresh done ok=${result.ok} imos=${result.imoCount} added=${result.added.length}`
     );

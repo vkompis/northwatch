@@ -24,7 +24,10 @@ export type AisStreamVessel = {
   eta: string | null;
   dimensionToBow: number | null;
   dimensionToStern: number | null;
+  /** Time of the last position fix — exposed as the vessel timestamp. */
   updatedAt: number;
+  /** Time of the last message of any kind — keeps static data cached between fixes. */
+  seenAt: number;
   source: 'aisstream';
 };
 
@@ -118,6 +121,7 @@ function ensureVessel(mmsi: string): AisStreamVessel {
       dimensionToBow: null,
       dimensionToStern: null,
       updatedAt: 0,
+      seenAt: 0,
       source: 'aisstream',
     };
     vesselsByMmsi.set(mmsi, v);
@@ -196,8 +200,7 @@ function applyStatic(v: AisStreamVessel, body: any) {
     v.dimensionToBow = num(dim.A ?? dim.ToBow ?? dim.toBow);
     v.dimensionToStern = num(dim.B ?? dim.ToStern ?? dim.toStern);
   }
-
-  v.updatedAt = Date.now();
+  // updatedAt is the position time: static reports must not make an old fix look fresh
 }
 
 function handleEnvelope(raw: Buffer | ArrayBuffer | Buffer[] | string) {
@@ -231,6 +234,7 @@ function handleEnvelope(raw: Buffer | ArrayBuffer | Buffer[] | string) {
 
   const body = msg?.Message?.[type] ?? msg?.Message?.[Object.keys(msg?.Message || {})[0]];
   const v = ensureVessel(mmsi);
+  v.seenAt = Date.now();
   applyMeta(v, meta);
 
   if (POSITION_TYPES.has(type)) {
@@ -352,7 +356,7 @@ function sweepStale() {
   const now = Date.now();
   let removed = 0;
   for (const [mmsi, v] of vesselsByMmsi) {
-    if (!v.updatedAt || now - v.updatedAt > STALE_MS) {
+    if (now - Math.max(v.updatedAt, v.seenAt) > STALE_MS) {
       vesselsByMmsi.delete(mmsi);
       removed += 1;
     }

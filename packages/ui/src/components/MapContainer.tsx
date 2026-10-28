@@ -151,6 +151,8 @@ export default function MapContainer({
         }
         applyNorwayView();
         setMap(m);
+        // Dev-only handle for inspecting layers / zoom from the browser console
+        if (process.env.NODE_ENV !== 'production') (window as any).__svalmapMap = m;
       };
 
       let stylePoll: number | undefined;

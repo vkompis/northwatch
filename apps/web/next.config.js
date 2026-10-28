@@ -8,7 +8,7 @@ const nextConfig = {
     MAP_BASE_URL: process.env.MAP_BASE_URL,
     MAP_ATTRIBUTION: process.env.MAP_ATTRIBUTION,
     NEXT_PUBLIC_MAP_STYLE: process.env.NEXT_PUBLIC_MAP_STYLE || '/styles/svalmap-dark.json',
-    NEXT_PUBLIC_MAP_ATTRIBUTION: process.env.NEXT_PUBLIC_MAP_ATTRIBUTION || '© OpenStreetMap contributors',
+    NEXT_PUBLIC_MAP_ATTRIBUTION: process.env.NEXT_PUBLIC_MAP_ATTRIBUTION || 'AIS: BarentsWatch, AISStream · Events: Global Fishing Watch',
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8787',
   },
   async headers() {
