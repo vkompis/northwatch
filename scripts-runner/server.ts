@@ -1245,7 +1245,7 @@ function normalizeLiveVessel(input: {
   timestamp?: any;
   lengthM?: number | null;
   source?: string;
-}): any | null {
+}, opts?: { ignoreDisplayRules?: boolean }): any | null {
   const mmsiStr = String(input.mmsi || '').replace(/\D/g, '').padStart(9, '0').slice(-9);
   if (!mmsiStr || mmsiStr === '000000000') return null;
   const lon = Number(input.lon);
@@ -1260,15 +1260,18 @@ function normalizeLiveVessel(input: {
       ? shipTypeRaw
       : getShipTypeDescriptionFromCode(shipTypeRaw);
 
-  const decision = shouldIncludeVessel({
-    lon,
-    lat,
-    mmsi: mmsiStr,
-    imo: imoStr || null,
-    shipType: shipTypeRaw ?? shipType,
-    lengthM: input.lengthM ?? null,
-  });
-  if (!decision.include) return null;
+  // Point-in-EEZ tests are the expensive part — skip them when the caller ignores the rules
+  if (!opts?.ignoreDisplayRules) {
+    const decision = shouldIncludeVessel({
+      lon,
+      lat,
+      mmsi: mmsiStr,
+      imo: imoStr || null,
+      shipType: shipTypeRaw ?? shipType,
+      lengthM: input.lengthM ?? null,
+    });
+    if (!decision.include) return null;
+  }
 
   const isEuSanctioned =
     (!!imoStr && SANCTIONED_IMO.has(imoStr)) ||
@@ -1309,6 +1312,101 @@ function normalizeLiveVessel(input: {
     vessel_name: normalized.vessel_name,
   });
   return populateFromStaticCache(mmsiStr, normalized);
+}
+
+function aisStreamInput(v: ReturnType<typeof getAisStreamVessels>[number]) {
+  return {
+    mmsi: v.mmsi,
+    lon: v.lon,
+    lat: v.lat,
+    speed: v.speed,
+    course: v.course,
+    heading: v.heading,
+    status: v.status,
+    vessel_name: v.vessel_name,
+    destination: v.destination,
+    imo: v.imo,
+    shipType: v.shipType,
+    shipTypeCode: v.shipTypeCode,
+    eta: v.eta,
+    timestamp: v.updatedAt ? new Date(v.updatedAt).toISOString() : null,
+    lengthM: vesselLengthMeters(v),
+    source: 'aisstream',
+  };
+}
+
+/** BarentsWatch "latest combined" record → normalizeLiveVessel input (null without a fix). */
+function barentsWatchInput(v: any) {
+  const lon =
+    v?.lon ??
+    v?.Lon ??
+    v?.longitude ??
+    v?.Longitude ??
+    v?.position?.longitude ??
+    v?.position?.lon ??
+    v?.coordinates?.longitude;
+  const lat =
+    v?.lat ??
+    v?.Lat ??
+    v?.latitude ??
+    v?.Latitude ??
+    v?.position?.latitude ??
+    v?.position?.lat ??
+    v?.coordinates?.latitude;
+  if (typeof lon !== 'number' || typeof lat !== 'number') return null;
+  const lengthRaw = Number(
+    v?.shipLength ??
+      v?.length ??
+      (v?.dimensionA != null && v?.dimensionB != null
+        ? Number(v.dimensionA) + Number(v.dimensionB)
+        : NaN)
+  );
+  return {
+    mmsi: String(v?.mmsi ?? v?.MMSI ?? ''),
+    lon,
+    lat,
+    speed: v?.speedOverGround ?? v?.sog ?? v?.SpeedOverGround ?? null,
+    course: v?.courseOverGround ?? v?.cog ?? v?.CourseOverGround ?? null,
+    heading: v?.trueHeading ?? v?.heading ?? v?.TrueHeading ?? null,
+    status: v?.navigationalStatus ?? v?.navstat ?? v?.NavigationalStatus ?? null,
+    vessel_name: v?.shipName ?? v?.name ?? v?.ShipName ?? v?.properties?.name ?? null,
+    destination: v?.destination ?? v?.Destination ?? v?.properties?.destination ?? null,
+    imo: v?.imoNumber ?? v?.imo ?? v?.IMO ?? v?.properties?.imoNumber ?? null,
+    shipType: v?.shipTypeDesc ?? v?.shipType ?? v?.properties?.shipType ?? null,
+    eta: v?.eta ?? v?.ETA ?? v?.properties?.eta ?? null,
+    timestamp: v?.msgtime ?? v?.msgTime ?? v?.time ?? v?.Timestamp ?? null,
+    // Without length the fishing <15 m / leisure <45 m rule never applied to BW traffic
+    lengthM: Number.isFinite(lengthRaw) && lengthRaw > 0 ? lengthRaw : null,
+    source: 'barentswatch',
+  };
+}
+
+/** Same vessel from AISStream (existing) and BarentsWatch: newest fix wins, static fields fill gaps. */
+function mergeFeedRecords(existing: any, bw: any): any {
+  // AISStream used to win unconditionally, even with a fix up to 45 min older than BW's
+  const bwTime = Date.parse(String(bw.timestamp ?? ''));
+  const aisTime = Date.parse(String(existing.timestamp ?? ''));
+  const fix = Number.isFinite(bwTime) && (!Number.isFinite(aisTime) || bwTime > aisTime)
+    ? bw
+    : existing;
+  return {
+    ...bw,
+    ...existing,
+    lon: fix.lon,
+    lat: fix.lat,
+    speed: fix.speed,
+    course: fix.course,
+    heading: fix.heading,
+    status: fix.status ?? existing.status ?? bw.status,
+    timestamp: fix.timestamp,
+    vessel_name: existing.vessel_name || bw.vessel_name,
+    destination: existing.destination || bw.destination,
+    imo: existing.imo || bw.imo,
+    shipType:
+      existing.shipType && existing.shipType !== 'Unknown' ? existing.shipType : bw.shipType,
+    eta: existing.eta || bw.eta,
+    source: existing.source === 'aisstream' ? 'aisstream+bw' : existing.source,
+  };
 }
 
 /** Live AIS merge used by UI, search, incidents, and alert watcher. */
@@ -1359,24 +1457,7 @@ async function buildLivePositionsList(): Promise<{
   const byMmsi = new Map<string, any>();
 
   for (const v of getAisStreamVessels()) {
-    const normalized = normalizeLiveVessel({
-      mmsi: v.mmsi,
-      lon: v.lon,
-      lat: v.lat,
-      speed: v.speed,
-      course: v.course,
-      heading: v.heading,
-      status: v.status,
-      vessel_name: v.vessel_name,
-      destination: v.destination,
-      imo: v.imo,
-      shipType: v.shipType,
-      shipTypeCode: v.shipTypeCode,
-      eta: v.eta,
-      timestamp: v.updatedAt ? new Date(v.updatedAt).toISOString() : null,
-      lengthM: vesselLengthMeters(v),
-      source: 'aisstream',
-    });
+    const normalized = normalizeLiveVessel(aisStreamInput(v));
     if (normalized) byMmsi.set(normalized.mmsi, normalized);
   }
 
@@ -1397,89 +1478,11 @@ async function buildLivePositionsList(): Promise<{
   }
 
   for (const v of bwList) {
-    const lon =
-      v?.lon ??
-      v?.Lon ??
-      v?.longitude ??
-      v?.Longitude ??
-      v?.position?.longitude ??
-      v?.position?.lon ??
-      v?.coordinates?.longitude;
-    const lat =
-      v?.lat ??
-      v?.Lat ??
-      v?.latitude ??
-      v?.Latitude ??
-      v?.position?.latitude ??
-      v?.position?.lat ??
-      v?.coordinates?.latitude;
-    if (typeof lon !== 'number' || typeof lat !== 'number') continue;
-    const destinationRaw =
-      v?.destination ?? v?.Destination ?? v?.properties?.destination ?? null;
-    const etaRaw = v?.eta ?? v?.ETA ?? v?.properties?.eta ?? null;
-    const imoRaw =
-      v?.imoNumber ?? v?.imo ?? v?.IMO ?? v?.properties?.imoNumber ?? null;
-    const nameRaw =
-      v?.shipName ?? v?.name ?? v?.ShipName ?? v?.properties?.name ?? null;
-    const shipTypeRaw =
-      v?.shipTypeDesc ?? v?.shipType ?? v?.properties?.shipType ?? null;
-    const lengthRaw = Number(
-      v?.shipLength ??
-        v?.length ??
-        (v?.dimensionA != null && v?.dimensionB != null
-          ? Number(v.dimensionA) + Number(v.dimensionB)
-          : NaN)
-    );
-    const normalized = normalizeLiveVessel({
-      mmsi: String(v?.mmsi ?? v?.MMSI ?? ''),
-      lon,
-      lat,
-      speed: v?.speedOverGround ?? v?.sog ?? v?.SpeedOverGround ?? null,
-      course: v?.courseOverGround ?? v?.cog ?? v?.CourseOverGround ?? null,
-      heading: v?.trueHeading ?? v?.heading ?? v?.TrueHeading ?? null,
-      status: v?.navigationalStatus ?? v?.navstat ?? v?.NavigationalStatus ?? null,
-      vessel_name: nameRaw,
-      destination: destinationRaw,
-      imo: imoRaw,
-      shipType: shipTypeRaw,
-      eta: etaRaw,
-      timestamp: v?.msgtime ?? v?.msgTime ?? v?.time ?? v?.Timestamp ?? null,
-      // Without length the fishing <15 m / leisure <45 m rule never applied to BW traffic
-      lengthM: Number.isFinite(lengthRaw) && lengthRaw > 0 ? lengthRaw : null,
-      source: 'barentswatch',
-    });
+    const input = barentsWatchInput(v);
+    const normalized = input && normalizeLiveVessel(input);
     if (!normalized) continue;
     const existing = byMmsi.get(normalized.mmsi);
-    if (!existing) {
-      byMmsi.set(normalized.mmsi, normalized);
-      continue;
-    }
-    // AISStream used to win unconditionally, even with a fix up to 45 min older than BW's
-    const bwTime = Date.parse(String(normalized.timestamp ?? ''));
-    const aisTime = Date.parse(String(existing.timestamp ?? ''));
-    const fix = Number.isFinite(bwTime) && (!Number.isFinite(aisTime) || bwTime > aisTime)
-      ? normalized
-      : existing;
-    byMmsi.set(normalized.mmsi, {
-      ...normalized,
-      ...existing,
-      lon: fix.lon,
-      lat: fix.lat,
-      speed: fix.speed,
-      course: fix.course,
-      heading: fix.heading,
-      status: fix.status ?? existing.status ?? normalized.status,
-      timestamp: fix.timestamp,
-      vessel_name: existing.vessel_name || normalized.vessel_name,
-      destination: existing.destination || normalized.destination,
-      imo: existing.imo || normalized.imo,
-      shipType:
-        existing.shipType && existing.shipType !== 'Unknown'
-          ? existing.shipType
-          : normalized.shipType,
-      eta: existing.eta || normalized.eta,
-      source: existing.source === 'aisstream' ? 'aisstream+bw' : existing.source,
-    });
+    byMmsi.set(normalized.mmsi, existing ? mergeFeedRecords(existing, normalized) : normalized);
   }
 
   sweepStaticCache();
@@ -1494,34 +1497,84 @@ app.get('/api/live-positions', async (_req, res) => {
   }
 });
 
+/**
+ * Every vessel the feeds currently hold, display rules ignored — lets search find ships
+ * the map does not show (e.g. non-Russian traffic outside the Norwegian zones).
+ */
+let ALL_KNOWN_CACHE: { list: any[]; at: number } | null = null;
+function allKnownVessels(): any[] {
+  if (ALL_KNOWN_CACHE && Date.now() - ALL_KNOWN_CACHE.at < 15_000) return ALL_KNOWN_CACHE.list;
+  const byMmsi = new Map<string, any>();
+  for (const v of getAisStreamVessels()) {
+    const n = normalizeLiveVessel(aisStreamInput(v), { ignoreDisplayRules: true });
+    if (n) byMmsi.set(n.mmsi, n);
+  }
+  for (const v of getBarentsWatchCached() || []) {
+    const input = barentsWatchInput(v);
+    const n = input && normalizeLiveVessel(input, { ignoreDisplayRules: true });
+    if (!n) continue;
+    const existing = byMmsi.get(n.mmsi);
+    byMmsi.set(n.mmsi, existing ? mergeFeedRecords(existing, n) : n);
+  }
+  ALL_KNOWN_CACHE = { list: Array.from(byMmsi.values()), at: Date.now() };
+  return ALL_KNOWN_CACHE.list;
+}
+
+/** Lower is better: exact id, id prefix, exact name, name prefix, word prefix, substring. */
+function searchRank(v: any, q: string, digits: string): number | null {
+  const mmsi = String(v.mmsi || '');
+  const imo = String(v.imo || '');
+  const name = String(v.vessel_name || '').toLowerCase();
+  if (digits.length >= 3) {
+    if (mmsi === digits || imo === digits) return 0;
+    if (mmsi.startsWith(digits) || imo.startsWith(digits)) return 1;
+    if (mmsi.includes(digits) || imo.includes(digits)) return 4;
+  }
+  if (!name) return null;
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 2;
+  if (name.split(/[\s.-]+/).some((w) => w.startsWith(q))) return 3;
+  if (name.includes(q)) return 4;
+  return null;
+}
+
 app.get('/api/vessels/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim().toLowerCase();
     if (q.length < 2) return res.json({ results: [] });
     const list = await getLivePositionsList();
-    const digits = q.replace(/\D/g, '');
-    const results = list
-      .filter((v) => {
-        const name = String(v.vessel_name || '').toLowerCase();
-        const mmsi = String(v.mmsi || '');
-        const imo = String(v.imo || '');
-        if (digits.length >= 3 && (mmsi.includes(digits) || imo.includes(digits))) return true;
-        return name.includes(q);
-      })
-      .slice(0, 25)
-      .map((v) => ({
-        mmsi: v.mmsi,
-        vessel_name: v.vessel_name,
-        imo: v.imo,
-        lon: v.lon,
-        lat: v.lat,
-        sanctioned: !!v.sanctioned,
-        shadowfleet: !!v.shadowfleet,
-        military: !!v.military,
-        research: !!v.research,
-        shipType: v.shipType,
-      }));
-    res.json({ results, totalLive: list.length });
+    const live = new Set(list.map((v) => v.mmsi));
+    const digits = /^[\d\s]+$/.test(q) ? q.replace(/\D/g, '') : '';
+    const candidates = [...list, ...allKnownVessels().filter((v) => !live.has(v.mmsi))];
+    const ranked: { v: any; rank: number }[] = [];
+    for (const v of candidates) {
+      const rank = searchRank(v, q, digits);
+      if (rank == null) continue;
+      // Ships on the map first when equally good
+      ranked.push({ v, rank: rank + (live.has(v.mmsi) ? 0 : 0.5) });
+    }
+    ranked.sort((a, b) => a.rank - b.rank);
+    const results = ranked.slice(0, 25).map(({ v }) => ({
+      mmsi: v.mmsi,
+      vessel_name: v.vessel_name,
+      imo: v.imo,
+      lon: v.lon,
+      lat: v.lat,
+      timestamp: v.timestamp,
+      speed: v.speed,
+      course: v.course,
+      heading: v.heading,
+      status: v.status,
+      destination: v.destination,
+      eta: v.eta,
+      sanctioned: !!v.sanctioned,
+      shadowfleet: !!v.shadowfleet,
+      military: !!v.military,
+      research: !!v.research,
+      shipType: v.shipType,
+      onMap: live.has(v.mmsi),
+    }));
+    res.json({ results, totalLive: list.length, totalKnown: candidates.length });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || String(e) });
   }

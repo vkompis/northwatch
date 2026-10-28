@@ -63,6 +63,7 @@ const DEFAULT_OVERLAYS: OverlayVisibility = {
   'pipelines-old': false,
   petroleum: false,
   bathymetry: false,
+  'seabed-relief': false,
   nsm: false,
   skytefelt: false,
   ports: false,
@@ -211,6 +212,11 @@ export default function HomePage() {
               : legacyPet,
             petroleum: Boolean(p.overlays.petroleum),
             'pipelines-old': Boolean(p.overlays['pipelines-old']),
+            // "Bathymetry" used to be relief + contours in one toggle
+            'seabed-relief':
+              typeof p.overlays['seabed-relief'] === 'boolean'
+                ? p.overlays['seabed-relief']
+                : Boolean(p.overlays.bathymetry),
             airports: false,
             // Always start with nav warnings off (enable in session as needed)
             navwarnings: false,
@@ -414,6 +420,14 @@ export default function HomePage() {
         research?: boolean;
         lon?: number;
         lat?: number;
+        /** Latest fix when the caller has one (search hits outside the map's coverage) */
+        speed?: number | null;
+        course?: number | null;
+        heading?: number | null;
+        status?: string | number | null;
+        destination?: string | null;
+        eta?: string | null;
+        timestamp?: string | null;
       }
     ) => {
       const id = String(mmsi || '').replace(/\D/g, '').padStart(9, '0').slice(-9);
@@ -442,15 +456,15 @@ export default function HomePage() {
           category: opts?.russian && category === 'rest' ? 'russia' : category,
           flagCountry: mmsiFlagCountry(id),
           shipClass: resolveShipClass(shipType),
-          speed: null,
+          speed: opts?.speed ?? null,
           imo,
-          course: null,
-          heading: null,
-          destination: null,
+          course: opts?.course ?? null,
+          heading: opts?.heading != null && opts.heading !== 511 ? opts.heading : null,
+          destination: opts?.destination || null,
           shipType,
-          status: null,
-          eta: null,
-          timestamp: null,
+          status: opts?.status ?? null,
+          eta: opts?.eta || null,
+          timestamp: opts?.timestamp || null,
           source: null,
           sanctioned: opts?.sanctioned ? 1 : 0,
           shadowfleet: opts?.shadowfleet ? 1 : 0,
@@ -470,6 +484,19 @@ export default function HomePage() {
 
   const selectedMmsi =
     selection?.kind === 'vessel' ? selection.vessel.mmsi : pendingMmsi;
+  const selVessel = selection?.kind === 'vessel' ? selection.vessel : null;
+  const selectedFallback = useMemo(
+    () =>
+      selVessel
+        ? {
+            mmsi: selVessel.mmsi,
+            label: selVessel.name || selVessel.label,
+            lon: selVessel.lon,
+            lat: selVessel.lat,
+          }
+        : null,
+    [selVessel?.mmsi, selVessel?.name, selVessel?.label, selVessel?.lon, selVessel?.lat]
+  );
 
   useEffect(() => {
     if (!prefsReady) return;
@@ -596,8 +623,16 @@ export default function HomePage() {
               research: hit.research,
               lon: hit.lon,
               lat: hit.lat,
+              speed: hit.speed,
+              course: hit.course,
+              heading: hit.heading,
+              status: hit.status,
+              destination: hit.destination,
+              eta: hit.eta,
+              timestamp: hit.timestamp,
             })
           }
+          onOpenMmsi={(mmsi) => openVesselByMmsi(mmsi)}
         />
         <div className="chrome-meta">
           <span
@@ -822,7 +857,12 @@ export default function HomePage() {
               onChange={(on) => setOverlay('ice-edge', on)}
             />
             <LayerRow
-              label="Bathymetry"
+              label="Seabed relief"
+              checked={overlays['seabed-relief']}
+              onChange={(on) => setOverlay('seabed-relief', on)}
+            />
+            <LayerRow
+              label="Depth contours"
               checked={overlays.bathymetry}
               onChange={(on) => setOverlay('bathymetry', on)}
             />
@@ -952,6 +992,7 @@ export default function HomePage() {
           gfw={gfw}
           shipsVisible={shipsVisible}
           selectedMmsi={selectedMmsi}
+          selectedFallback={selectedFallback}
           vesselFilters={vesselFilters}
           trackDays={trackDays}
           watchlistMmsis={watchlistMmsis}
@@ -1028,7 +1069,8 @@ export default function HomePage() {
                     />
                     {selectedVessel.country || 'Unknown'}
                   </div>
-                  {!!selectedVessel.sanctioned && (
+                  {/* Lookup covers vessels opened without live data (search by MMSI, GFW) */}
+                  {(!!selectedVessel.sanctioned || sanctionsInfo?.sanctioned === true) && (
                     <div className="country" style={{ marginTop: 6 }}>
                       <img
                         src="/markers/Circles/Sanksjon.svg"
@@ -1038,7 +1080,7 @@ export default function HomePage() {
                       Sanctioned vessel
                     </div>
                   )}
-                  {!!selectedVessel.shadowfleet && (
+                  {(!!selectedVessel.shadowfleet || sanctionsInfo?.shadowfleet === true) && (
                     <div className="country" style={{ marginTop: 6 }}>
                       <img
                         src="/markers/Circles/shadowtriangle.svg"

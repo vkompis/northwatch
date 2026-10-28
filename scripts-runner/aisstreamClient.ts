@@ -6,7 +6,10 @@
  * North Atlantic north of 54°N. The API key must never be exposed to the browser.
  */
 
+import fs from 'fs';
+import path from 'path';
 import WebSocket from 'ws';
+import { dataCache, ensureDir } from './paths';
 
 export type AisStreamVessel = {
   mmsi: string;
@@ -364,6 +367,45 @@ function sweepStale() {
   if (removed > 0) {
     console.log(`[aisstream] swept ${removed} stale vessels; cache=${vesselsByMmsi.size}`);
   }
+  saveSnapshot();
+}
+
+/**
+ * Warm start: the cache is written to disk every sweep and on shutdown, and reloaded
+ * on start. Without it every restart empties the map outside BarentsWatch coverage
+ * (e.g. the Baltic) and IMO-based sanction matches wait ~6 min for static reports.
+ */
+const SNAPSHOT_FILE = () => dataCache('aisstream-snapshot.json');
+
+function saveSnapshot() {
+  try {
+    ensureDir(dataCache());
+    const file = SNAPSHOT_FILE();
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(Array.from(vesselsByMmsi.values())));
+    fs.renameSync(tmp, file);
+  } catch (e: any) {
+    console.warn('[aisstream] snapshot write failed', e?.message || e);
+  }
+}
+
+function restoreSnapshot() {
+  try {
+    const file = SNAPSHOT_FILE();
+    if (!fs.existsSync(file)) return;
+    const now = Date.now();
+    let restored = 0;
+    for (const v of JSON.parse(fs.readFileSync(file, 'utf8')) as AisStreamVessel[]) {
+      if (!v?.mmsi || vesselsByMmsi.has(v.mmsi)) continue;
+      const seen = Math.max(v.updatedAt || 0, v.seenAt || 0);
+      if (now - seen > STALE_MS) continue;
+      vesselsByMmsi.set(v.mmsi, { ...v, seenAt: v.seenAt || seen, source: 'aisstream' });
+      restored += 1;
+    }
+    console.log(`[aisstream] restored ${restored} vessels from ${path.basename(file)}`);
+  } catch (e: any) {
+    console.warn('[aisstream] snapshot restore failed', e?.message || e);
+  }
 }
 
 function runWatchdog() {
@@ -391,6 +433,13 @@ export function startAisStreamClient(): void {
   }
   started = true;
   apiKeyHeld = apiKey;
+  restoreSnapshot();
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      saveSnapshot();
+      process.exit(0);
+    });
+  }
   connect(apiKey);
   if (!sweepTimer) sweepTimer = setInterval(sweepStale, SWEEP_MS);
   if (!watchdogTimer) watchdogTimer = setInterval(runWatchdog, WATCHDOG_MS);

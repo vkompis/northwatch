@@ -1118,8 +1118,28 @@ body {
   cursor: pointer;
 }
 .vessel-search-results button:hover,
+.vessel-search-results button.active,
 .watchlist-open:hover {
   background: #1e293b;
+}
+.vs-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #334155;
+  color: #cbd5e1;
+  font-size: 10px;
+  font-weight: 500;
+}
+.vessel-search-open {
+  display: block;
+  margin-top: 6px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: #38bdf8;
+  font-size: 12px;
+  cursor: pointer;
 }
 .vs-name {
   font-size: 13px;

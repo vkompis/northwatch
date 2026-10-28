@@ -29,6 +29,7 @@ type Props = {
   gfw: GfwVisibility;
   shipsVisible: boolean;
   selectedMmsi?: string | null;
+  selectedFallback?: { mmsi: string; label?: string | null; lon: number | null; lat: number | null } | null;
   vesselFilters?: VesselFilterFlags;
   trackDays?: number;
   watchlistMmsis?: ReadonlySet<string> | string[];
@@ -58,6 +59,7 @@ export default function MapCanvas({
   gfw,
   shipsVisible,
   selectedMmsi,
+  selectedFallback,
   vesselFilters,
   trackDays = 1,
   watchlistMmsis,
@@ -104,6 +106,7 @@ export default function MapCanvas({
         visible={shipsVisible && !drawingAoi}
         interactive={!drawingAoi}
         selectedMmsi={selectedMmsi}
+        selectedFallback={selectedFallback}
         filters={vesselFilters}
         trackDays={trackDays}
         watchlistMmsis={watchlistMmsis}

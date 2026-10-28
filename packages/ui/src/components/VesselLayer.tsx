@@ -79,6 +79,11 @@ type Props = {
   flyToSelected?: boolean;
   /** Watchlist MMSIs — used when filters.watchlistOnly is on. */
   watchlistMmsis?: ReadonlySet<string> | string[];
+  /**
+   * Selected vessel as the page knows it — name and position for the highlight when
+   * the vessel is not in the live feed (search hit outside coverage, GFW handoff).
+   */
+  selectedFallback?: { mmsi: string; label?: string | null; lon: number | null; lat: number | null } | null;
 };
 
 const MARKER_IMAGES: { name: string; url: string }[] = [
@@ -309,6 +314,7 @@ export default function VesselLayer({
   trackDays = 1,
   flyToSelected = true,
   watchlistMmsis,
+  selectedFallback = null,
 }: Props) {
   const map = useMap();
   const apiBase =
@@ -344,6 +350,9 @@ export default function VesselLayer({
   }
   const selectedMmsiRef = useRef(selectedMmsi);
   selectedMmsiRef.current = selectedMmsi;
+  const selectedFallbackRef = useRef(selectedFallback);
+  selectedFallbackRef.current = selectedFallback;
+  const showSelectedRef = useRef<(() => void) | null>(null);
   const applyFilterRef = useRef<(() => void) | null>(null);
   const allFeaturesRef = useRef<any[]>([]);
   /** MMSI the camera last flew to — deep links resolve before the vessel list arrives. */
@@ -374,6 +383,8 @@ export default function VesselLayer({
     const trackSourceId = 'vessel-track';
     const trackLayerIds = ['vessel-track-line', 'vessel-track-points'];
     const projSourceId = 'vessel-projection';
+    const selSourceId = 'vessel-selected';
+    const selLayerIds = ['vessel-selected-glow', 'vessel-selected-ring', 'vessel-selected-label'];
     const projLayerIds = ['vessel-projection-rings', 'vessel-projection-labels'];
     let trackAbort: AbortController | undefined;
     let activeTrackMmsi: string | null = null;
@@ -715,10 +726,8 @@ export default function VesselLayer({
     /** Centre on the selected vessel once per selection, as soon as its position is known. */
     function flyToVessel(mmsi: string) {
       if (!flyToSelectedRef.current || flownToRef.current === mmsi) return;
-      const v = vesselsByMmsiRef.current.get(mmsi);
-      if (v?.lon == null || v?.lat == null || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) {
-        return;
-      }
+      const v = selectedPosition(mmsi);
+      if (!v) return;
       flownToRef.current = mmsi;
       try {
         map.flyTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), 7.5), speed: 1.2 });
@@ -726,6 +735,106 @@ export default function VesselLayer({
         /* ignore */
       }
     }
+
+    /** Live position first; the page's copy covers vessels outside the live feed. */
+    function selectedPosition(mmsi: string): { lon: number; lat: number; label: string } | null {
+      const live = vesselsByMmsiRef.current.get(mmsi);
+      const fb = selectedFallbackRef.current;
+      const src = live ?? (fb && fb.mmsi === mmsi ? fb : null);
+      if (!src || src.lon == null || src.lat == null) return null;
+      if (!Number.isFinite(src.lon) || !Number.isFinite(src.lat)) return null;
+      const label = (live?.name || live?.label || fb?.label || `MMSI ${mmsi}`) as string;
+      return { lon: src.lon as number, lat: src.lat as number, label };
+    }
+
+    function ensureSelectedLayers() {
+      if (!map.getSource(selSourceId)) {
+        map.addSource(selSourceId, {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+      }
+      if (!map.getLayer('vessel-selected-glow')) {
+        map.addLayer({
+          id: 'vessel-selected-glow',
+          type: 'circle',
+          source: selSourceId,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 14, 8, 22, 12, 28],
+            'circle-color': '#facc15',
+            'circle-opacity': 0.18,
+            'circle-blur': 0.6,
+          },
+        });
+      }
+      if (!map.getLayer('vessel-selected-ring')) {
+        map.addLayer({
+          id: 'vessel-selected-ring',
+          type: 'circle',
+          source: selSourceId,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 9, 8, 15, 12, 19],
+            'circle-color': 'rgba(0, 0, 0, 0)',
+            'circle-stroke-color': '#facc15',
+            'circle-stroke-width': 2.5,
+          },
+        });
+      }
+      if (!map.getLayer('vessel-selected-label')) {
+        map.addLayer({
+          id: 'vessel-selected-label',
+          type: 'symbol',
+          source: selSourceId,
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-font': MAP_FONT_BOLD,
+            'text-size': 13,
+            'text-anchor': 'top',
+            'text-offset': [0, 1.6],
+            'text-allow-overlap': true,
+            'text-ignore-placement': true,
+          },
+          paint: {
+            'text-color': '#fde68a',
+            'text-halo-color': 'rgba(4, 10, 20, 0.95)',
+            'text-halo-width': 2,
+          },
+        });
+      }
+    }
+
+    /** Yellow ring + name on the selected vessel at every zoom, above all ship markers. */
+    function showSelected() {
+      if (!mapStyleReady(map)) return;
+      const mmsi = selectedMmsiRef.current;
+      const pos = mmsi ? selectedPosition(mmsi) : null;
+      ensureSelectedLayers();
+      const src = map.getSource(selSourceId) as any;
+      src?.setData({
+        type: 'FeatureCollection',
+        features: pos
+          ? [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [pos.lon, pos.lat] },
+                properties: { mmsi, label: pos.label },
+              },
+            ]
+          : [],
+      });
+      for (const id of selLayerIds) {
+        try {
+          if (map.getLayer(id)) map.moveLayer(id);
+        } catch {
+          /* ignore */
+        }
+      }
+      // The selected name is drawn by the highlight; avoid a second label underneath
+      if (map.getLayer('vessels-label')) {
+        map.setFilter('vessels-label', mmsi ? ['!=', ['get', 'mmsi'], mmsi] : null);
+      }
+    }
+    showSelectedRef.current = showSelected;
 
     function ensureTrackLayers() {
       if (!map.getSource(trackSourceId)) {
@@ -840,6 +949,8 @@ export default function VesselLayer({
       const all = allFeaturesRef.current;
       const extras = { watchlistMmsis: watchlistRef.current };
       const features = all.filter((feat) =>
+        // A selected vessel stays on the map even when the filters would hide it
+        feat?.properties?.mmsi === selectedMmsiRef.current ||
         vesselPassesFilter(feat?.properties || {}, f, extras)
       );
       const src = map.getSource(sourceId) as any;
@@ -1201,6 +1312,7 @@ export default function VesselLayer({
           showProjection(sel);
           flyToVessel(sel);
         }
+        showSelected();
         emitStatus({
           lastUpdate: new Date().toISOString(),
           error: null,
@@ -1268,9 +1380,10 @@ export default function VesselLayer({
       for (const id of [...trackLayerIds].reverse()) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
-      for (const id of [...projLayerIds].reverse()) {
+      for (const id of [...projLayerIds, ...selLayerIds].reverse()) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
+      if (map.getSource(selSourceId)) map.removeSource(selSourceId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       if (map.getSource(trackSourceId)) map.removeSource(trackSourceId);
       if (map.getSource(projSourceId)) map.removeSource(projSourceId);
@@ -1303,6 +1416,8 @@ export default function VesselLayer({
   }, [filters, watchlistMmsis]);
 
   useEffect(() => {
+    applyFilterRef.current?.();
+    showSelectedRef.current?.();
     if (!selectedMmsi) {
       flownToRef.current = null;
       clearTrackRef.current?.();
@@ -1314,6 +1429,12 @@ export default function VesselLayer({
     // Unknown position yet (deep link before first refresh) → refresh() flies once it lands
     flyToVesselRef.current?.(selectedMmsi);
   }, [selectedMmsi, trackDays, map]);
+
+  // Position / name for vessels outside the live feed can arrive after the selection
+  useEffect(() => {
+    showSelectedRef.current?.();
+    if (selectedMmsi) flyToVesselRef.current?.(selectedMmsi);
+  }, [selectedFallback?.lon, selectedFallback?.lat, selectedFallback?.label, selectedMmsi]);
 
   return null;
 }

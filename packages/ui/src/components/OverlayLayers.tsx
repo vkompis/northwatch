@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useMap } from '../hooks/useMap';
 import { mapStyleReady, safeGetLayer } from '../utils/mapSafe';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
+import { SEABED_DEM_TILES, registerSeabedProtocol } from '../utils/seabedDem';
 
 export type OverlayVisibility = {
   'eez-norway': boolean;
@@ -17,8 +18,10 @@ export type OverlayVisibility = {
   'pipelines-old': boolean;
   /** Sodir oil / gas facility points */
   petroleum: boolean;
-  /** Open Waters Seascape bathymetry (depth shading + contours) */
+  /** Depth contours, depth labels and soundings (Open Waters, Kartverket near the coast) */
   bathymetry: boolean;
+  /** Hillshaded sea floor (land stays flat) */
+  'seabed-relief': boolean;
   nsm: boolean;
   skytefelt: boolean;
   ports: boolean;
@@ -166,11 +169,14 @@ const TG_LANDINGS_FILE = 'cable-landings-telegeography-norway.geojson';
 const SEASCAPE_BASE = 'https://tiles.openwaters.io/seascape';
 const BATHY_DEM_SOURCE = 'overlay-bathymetry-dem';
 const BATHY_VEC_SOURCE = 'overlay-bathymetry-vector';
-/** Basemap DEM (svalmap-dark.json `terrain`); added here if a style lacks it. */
-const TERRAIN_SOURCE = 'terrain';
-const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
-/** NRK-style land shadows in the basemap — replaced by the seabed relief while it is on. */
-const BASEMAP_HILLSHADE = 'hillshade-land';
+const SEABED_DEM_SOURCE = 'overlay-seabed-dem';
+const SEABED_RELIEF_LAYER = 'overlay-seabed-relief';
+/** Earlier ids: a DEM of its own, then a relief on the land+sea basemap terrain. */
+const LEGACY_BATHY_LAYERS = [
+  'overlay-bathymetry-hillshade',
+  'overlay-bathymetry-depth',
+  'overlay-bathymetry-relief',
+];
 /**
  * Kartverket "Sjøkart – Dybdedata" WMS: charted contours with depth labels (from ~z14)
  * and soundings / shoals (from ~z15) in Norwegian waters. The service only draws
@@ -183,7 +189,6 @@ const KV_DEPTH_TILES =
   '&LAYERS=Dybdekontur,Dybdepunkt,grunne,skjaer_punkt&STYLES=&CRS=EPSG:3857' +
   '&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true';
 const BATHY_LAYER_IDS = [
-  'overlay-bathymetry-relief',
   'overlay-bathymetry-contours',
   'overlay-bathymetry-labels',
   'overlay-bathymetry-soundings',
@@ -191,8 +196,8 @@ const BATHY_LAYER_IDS = [
 ] as const;
 
 /**
- * Seabed relief = MapLibre hillshade over the AWS terrarium DEM (ETOPO / GEBCO-derived
- * depths at sea), drawn just above the water fill. Open Waters supplies contours,
+ * Seabed relief = MapLibre hillshade over the AWS terrarium DEM with land flattened
+ * (see seabedDem.ts), drawn just above the water fill. Open Waters supplies contours,
  * depth labels and soundings. Its depth-area fills are still left out: semi-transparent
  * vector fills draw tile-grid seams in MapLibre.
  */
@@ -339,16 +344,6 @@ function beforeIdForSeabedRelief(map: {
   const water = layers.findIndex((l) => l.id === 'water-fill');
   if (water >= 0 && layers[water + 1]) return layers[water + 1].id;
   return beforeIdForBathymetry(map);
-}
-
-/** The seabed relief also shades land, so the basemap's land shadows step aside while it is on. */
-function syncBasemapHillshade(map: any, bathymetryOn: boolean) {
-  if (!safeGetLayer(map, BASEMAP_HILLSHADE)) return;
-  try {
-    map.setLayoutProperty(BASEMAP_HILLSHADE, 'visibility', bathymetryOn ? 'none' : 'visible');
-  } catch {
-    /* ignore */
-  }
 }
 
 function vis(visible: boolean): 'visible' | 'none' {
@@ -680,20 +675,15 @@ export default function OverlayLayers({
     }
 
     /**
-     * Open Waters Seascape bathymetry — contours + depth labels only.
-     * Depth-area fills and DEM hillshade are omitted: both cause straight
-     * tile-grid seams (vertical/horizontal lines) in MapLibre.
+     * Seabed relief plus depth contours / labels / soundings (Open Waters, Kartverket).
+     * Open Waters depth-area fills are omitted: they draw tile-grid seams in MapLibre.
      */
     async function loadBathymetry() {
       if (!mapStyleReady(map)) return;
       const beforeId = beforeIdForBathymetry(map);
       const v = vis(visibility.bathymetry);
 
-      // Drop legacy layers that produce tile-seam artifacts
-      for (const legacyId of [
-        'overlay-bathymetry-hillshade',
-        'overlay-bathymetry-depth',
-      ]) {
+      for (const legacyId of LEGACY_BATHY_LAYERS) {
         if (safeGetLayer(map, legacyId)) {
           try {
             map.removeLayer(legacyId);
@@ -702,7 +692,6 @@ export default function OverlayLayers({
           }
         }
       }
-      // Older builds added their own DEM here; the relief now shares the basemap terrain
       if (map.getSource(BATHY_DEM_SOURCE)) {
         try {
           map.removeSource(BATHY_DEM_SOURCE);
@@ -711,10 +700,11 @@ export default function OverlayLayers({
         }
       }
 
-      if (!map.getSource(TERRAIN_SOURCE)) {
-        map.addSource(TERRAIN_SOURCE, {
+      registerSeabedProtocol();
+      if (!map.getSource(SEABED_DEM_SOURCE)) {
+        map.addSource(SEABED_DEM_SOURCE, {
           type: 'raster-dem',
-          tiles: [TERRAIN_TILES],
+          tiles: [SEABED_DEM_TILES],
           encoding: 'terrarium',
           tileSize: 256,
           maxzoom: 12,
@@ -723,13 +713,13 @@ export default function OverlayLayers({
         } as any);
       }
 
-      if (!safeGetLayer(map, 'overlay-bathymetry-relief')) {
+      if (!safeGetLayer(map, SEABED_RELIEF_LAYER)) {
         map.addLayer(
           {
-            id: 'overlay-bathymetry-relief',
+            id: SEABED_RELIEF_LAYER,
             type: 'hillshade',
-            source: TERRAIN_SOURCE,
-            layout: { visibility: v },
+            source: SEABED_DEM_SOURCE,
+            layout: { visibility: vis(visibility['seabed-relief']) },
             paint: {
               'hillshade-illumination-direction': 315,
               'hillshade-shadow-color': 'rgba(0, 4, 12, 0.9)',
@@ -897,7 +887,6 @@ export default function OverlayLayers({
         );
       }
 
-      syncBasemapHillshade(map, visibility.bathymetry);
       applyBathymetryPaint(map);
     }
 
@@ -1197,11 +1186,8 @@ export default function OverlayLayers({
       map.setLayoutProperty('overlay-tg-landings-label', 'visibility', tgVis);
     }
     const bathyVis = vis(visibility.bathymetry);
-    // Ensure seam-causing legacy layers stay gone even if the map was hot-reloaded
-    for (const legacyId of [
-      'overlay-bathymetry-hillshade',
-      'overlay-bathymetry-depth',
-    ]) {
+    // Ensure legacy bathymetry layers stay gone even if the map was hot-reloaded
+    for (const legacyId of LEGACY_BATHY_LAYERS) {
       if (safeGetLayer(map, legacyId)) {
         try {
           map.removeLayer(legacyId);
@@ -1215,7 +1201,9 @@ export default function OverlayLayers({
         map.setLayoutProperty(lid, 'visibility', bathyVis);
       }
     }
-    syncBasemapHillshade(map, visibility.bathymetry);
+    if (safeGetLayer(map, SEABED_RELIEF_LAYER)) {
+      map.setLayoutProperty(SEABED_RELIEF_LAYER, 'visibility', vis(visibility['seabed-relief']));
+    }
     if (visibility.bathymetry) {
       try {
         applyBathymetryPaint(map);
