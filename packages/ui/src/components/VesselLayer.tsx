@@ -122,6 +122,7 @@ const MARKER_IMAGES: { name: string; url: string }[] = [
   { name: 'Researchcircle', url: '/markers/Circles/Researchcircle.svg' },
   { name: 'Sanksjon', url: '/markers/Circles/Sanksjon.svg' },
   { name: 'ShadowTriangle', url: '/markers/Circles/shadowtriangle.svg' },
+  { name: 'WatchStar', url: '/markers/Circles/watchstar.svg' },
   { name: 'Norwaytriangle', url: '/markers/Countries/Norwaytriangle.svg' },
   { name: 'Russiatriangle', url: '/markers/Countries/Russiatriangle.svg' },
   { name: 'EUtriangle', url: '/markers/Countries/EUtriangle.svg' },
@@ -412,6 +413,7 @@ export default function VesselLayer({
       'vessels-label',
       'sanction-indicator',
       'shadow-indicator',
+      'watch-indicator',
     ];
     const trackSourceId = 'vessel-track';
     const trackLayerIds = ['vessel-track-line', 'vessel-track-points'];
@@ -589,6 +591,10 @@ export default function VesselLayer({
       0.93,
     ];
     const badgeTranslate: any = [0, -24];
+    // Watchlist star sits up and to the right, clear of the sanction / shadow badge above
+    const watchSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.6, 8, 0.8];
+    const watchTranslate: any = [17, -10];
+    const watchFilter = (): any => ['in', ['get', 'mmsi'], ['literal', [...watchlistRef.current]]];
 
     function setLayersVisible(on: boolean) {
       const v = on ? 'visible' : 'none';
@@ -1106,6 +1112,7 @@ export default function VesselLayer({
       if (src) {
         src.setData({ type: 'FeatureCollection', features });
       }
+      if (map.getLayer('watch-indicator')) map.setFilter('watch-indicator', watchFilter());
       emitStatus({ vesselCount: features.length });
     }
     applyFilterRef.current = applyFeatureFilter;
@@ -1287,6 +1294,26 @@ export default function VesselLayer({
           paint: {
             'icon-opacity': ['case', ['==', ['get', 'shadowfleet'], 1], 1, 0],
             'icon-translate': badgeTranslate,
+            'icon-translate-anchor': 'viewport',
+          },
+        });
+      }
+
+      if (!map.getLayer('watch-indicator')) {
+        map.addLayer({
+          id: 'watch-indicator',
+          type: 'symbol',
+          source: sourceId,
+          filter: watchFilter(),
+          layout: {
+            'icon-image': 'WatchStar',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'icon-size': watchSize,
+            'icon-anchor': 'center',
+          },
+          paint: {
+            'icon-translate': watchTranslate,
             'icon-translate-anchor': 'viewport',
           },
         });
@@ -1564,6 +1591,7 @@ export default function VesselLayer({
         'vessels-label',
         'sanction-indicator',
         'shadow-indicator',
+        'watch-indicator',
       ]) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', v);
       }

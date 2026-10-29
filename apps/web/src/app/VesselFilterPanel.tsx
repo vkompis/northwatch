@@ -16,7 +16,7 @@ import {
   vesselCategoryKey,
   vesselShipClass,
 } from '@svalmap/ui';
-import LayerRow, { RingMarker, TriangleMarker } from './LayerRow';
+import LayerRow, { SANCTION_EDGE, SHADOW_EDGE, StarMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
 const CATEGORY_LABELS: Record<VesselCategory, string> = {
   norway: 'Norwegian',
@@ -144,21 +144,21 @@ export default function VesselFilterPanel({
       />
       <LayerRow
         label="Sanctioned"
-        marker={<RingMarker color="#F0704A" />}
+        marker={<WarningMarker edge={SANCTION_EDGE} />}
         count={counts.sanctioned}
         checked={filters.sanctioned}
         onChange={(on) => set('sanctioned', on)}
       />
       <LayerRow
         label="Shadow fleet"
-        marker={<RingMarker color="#B9A0E6" dashed />}
+        marker={<WarningMarker edge={SHADOW_EDGE} />}
         count={counts.shadow}
         checked={filters.shadow}
         onChange={(on) => set('shadow', on)}
       />
       <LayerRow
         label="Watchlist"
-        marker={<RingMarker color="#E7A54A" />}
+        marker={<StarMarker />}
         count={counts.watchlist}
         checked={filters.watchlistOnly}
         onChange={(on) => set('watchlistOnly', on)}

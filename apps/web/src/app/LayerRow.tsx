@@ -25,6 +25,36 @@ export function RingMarker({ color, dashed = false }: { color: string; dashed?: 
   );
 }
 
+/** Warning triangle the map draws over sanctioned (red edge) and shadow-fleet (dark edge) ships. */
+export function WarningMarker({ edge }: { edge: string }) {
+  return (
+    <svg width="15" height="13" viewBox="0 0 255.12 225.46" aria-hidden="true">
+      <path d="M238.25,208.59L127.56,16.87,16.87,208.59h221.39Z" fill="none" stroke={edge} strokeWidth="33.73" strokeLinejoin="round" />
+      <path d="M228.68,203.07L127.56,27.92,26.44,203.07h202.24Z" fill="#fff" />
+      <path d="M127.56 79.41v58.93M127.56 174.66v-8.86" stroke="#000" strokeWidth="17" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Map edge colours of the sanction / shadow-fleet badges (public/markers/Circles/*.svg). */
+export const SANCTION_EDGE = '#dc0a14';
+export const SHADOW_EDGE = '#000a14';
+
+/** Star the map puts beside ships on the watchlist (public/markers/Circles/watchstar.svg). */
+export function StarMarker() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 3.2l2.6 5.4 5.9.7-4.4 4 1.2 5.9L12 16.3l-5.3 2.9 1.2-5.9-4.4-4 5.9-.7z"
+        fill="#E7A54A"
+        stroke="#0a1118"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function DotMarker({ color }: { color: string }) {
   return (
     <svg width="12" height="12" viewBox="-6 -6 12 12" aria-hidden="true">

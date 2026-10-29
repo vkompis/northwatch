@@ -42,6 +42,7 @@ import {
   MOVEABLE_FILE,
 } from './fetchSodirFacilities';
 import { fetchSodirPipelinesToFile } from './fetchSodirPipelines';
+import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
   RUSSIAN_RESEARCH_VESSELS.map((v) => [v.mmsi, v.name] as const)
@@ -800,11 +801,38 @@ async function fetchNavWarningsGeoJSON(): Promise<{
       if (w?.warningnumber && cancelled.has(String(w.warningnumber))) continue;
       const properties = warningProps(w, kind);
       const geometry = parseWktGeometry(w?.position);
-      if (!geometry || isAreaWideGeometry(geometry)) {
+      const placed = geometry && !isAreaWideGeometry(geometry) ? geometry : null;
+      const parts = warningPartsFromText(w?.message_en || w?.message_no);
+      // Kystverket's own polygon is drawn as given. Its points are an unordered bag, so when
+      // the text says they bound an area, follow a route or mark a circle, draw that instead;
+      // and when it only has the whole-NAVAREA position, use whatever positions the text gives.
+      const fromText = placed
+        ? placed.type !== 'Polygon' && parts.some((p) => p.shape !== 'points')
+        : parts.length > 0;
+      if (fromText) {
+        parts.forEach((p, i) =>
+          features.push({
+            type: 'Feature',
+            geometry: p.geometry,
+            properties: { ...properties, shape: p.shape, shapeFrom: 'text', primary: i === 0 ? 1 : 0 },
+          })
+        );
+        continue;
+      }
+      if (!placed) {
         notices.push({ ...properties, areaWide: Boolean(geometry) });
         continue;
       }
-      features.push({ type: 'Feature', geometry, properties });
+      features.push({
+        type: 'Feature',
+        geometry: placed,
+        properties: {
+          ...properties,
+          shape: placed.type === 'Polygon' ? 'area' : 'points',
+          shapeFrom: 'kystverket',
+          primary: 1,
+        },
+      });
     }
   }
   return {
@@ -814,11 +842,11 @@ async function fetchNavWarningsGeoJSON(): Promise<{
     meta: {
       source: 'Kystverket Data API',
       note:
-        'Currently active NAVAREA XIX + coastal warnings (no archive). Cancelled warnings are dropped; area-wide and position-less ones are listed as notices.',
+        'Currently active NAVAREA XIX + coastal warnings (no archive). Areas, routes and circles are read from the warning text where Kystverket gives only points. Cancelled warnings are dropped; area-wide and position-less ones are listed as notices.',
       lookbackDays: 30,
       navareaActive: navarea.length,
       coastalActive: coastal.length,
-      onMap: features.length,
+      onMap: features.filter((f) => f.properties.primary === 1).length,
       notices: notices.length,
       cancelled: [...cancelled],
     },

@@ -54,6 +54,8 @@ type Props = {
   onTrack?: (track: VesselTrack | null) => void;
   onNavWarningsData?: (data: { onMap: number; notices: NavWarningProps[] }) => void;
   scrub?: VesselScrub | null;
+  /** Panels over the map, kept clear when fitting to a clicked warning. */
+  warningPadding?: { top: number; right: number; bottom: number; left: number };
 };
 
 export default function MapCanvas({
@@ -87,6 +89,7 @@ export default function MapCanvas({
   onTrack,
   onNavWarningsData,
   scrub = null,
+  warningPadding,
 }: Props) {
   return (
     <MapContainer
@@ -108,6 +111,7 @@ export default function MapCanvas({
         // The feed only has in-force warnings, so "last 30 days" was the same set — one toggle
         showActive={overlays.navwarnings || overlays['navwarnings-30d']}
         onData={onNavWarningsData}
+        fitPadding={warningPadding}
         interactive={!drawingAoi}
         onWarningSelect={drawingAoi ? undefined : onNavWarningSelect}
       />

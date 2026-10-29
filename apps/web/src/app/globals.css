@@ -1876,11 +1876,9 @@ body {
   border-radius: 999px;
   font-size: 12px;
 }
+/* Same red edge as the sanction triangle on the map */
 .dossier-badge.sanction {
-  border-color: var(--sv-sanction);
-}
-.dossier-badge.shadow {
-  border: 1px dashed var(--sv-shadow);
+  border-color: #dc0a14;
 }
 .dossier .ship-photo {
   margin-top: 16px !important;

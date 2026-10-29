@@ -285,8 +285,11 @@ export default function HomePage() {
   }, [overlays, gfw, shipsVisible, drawerOpen, vesselFilters, trackDays, showIncidents, prefsReady]);
 
   useEffect(() => {
+    // Until the stored list is loaded, `watchlist` is the empty initial state; saving it would
+    // wipe the list (React runs mount effects twice in dev, so the reload then reads it empty)
+    if (!prefsReady) return;
     saveWatchlist(watchlist);
-  }, [watchlist]);
+  }, [watchlist, prefsReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -525,6 +528,12 @@ export default function HomePage() {
           }
         : null,
     [selVessel, scrub, detailDrawerOpen, drawerOpen]
+  );
+
+  // A clicked warning opens the detail card on the right; fit its shape beside it
+  const warningPadding = useMemo(
+    () => ({ top: 56, right: 380, bottom: 40, left: drawerOpen ? 300 : 0 }),
+    [drawerOpen]
   );
 
   const dossierMmsi = selection?.kind === 'vessel' ? selection.vessel.mmsi : null;
@@ -1008,6 +1017,7 @@ export default function HomePage() {
           onTrack={setTrack}
           onNavWarningsData={setNavData}
           scrub={mapScrub}
+          warningPadding={warningPadding}
         />
       </div>
 
@@ -1561,7 +1571,9 @@ export default function HomePage() {
                       ? w.areaWide
                         ? 'Applies to the whole NAVAREA XIX — no specific position, so it is not drawn on the map.'
                         : 'No position given — not drawn on the map.'
-                      : 'Position from Kystverket; for some warnings it is extracted automatically from the text.'}
+                      : w.shapeFrom === 'text'
+                        ? 'Drawn from the positions in the message (Kystverket gives them only as loose points). Check against the text before relying on it.'
+                        : 'Position from Kystverket; for some warnings it is extracted automatically from the text.'}
                   </div>
                   <div className="row muted">
                     Source: Kystverket navigational warnings. Not a substitute for NAVTEX / SafetyNET.

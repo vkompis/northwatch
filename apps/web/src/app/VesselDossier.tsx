@@ -2,7 +2,7 @@
 
 import type { VesselFeatureProps } from '@svalmap/ui';
 import { HEADER_COLORS, ShipPhoto, formatLatLonDm, navStatusLabel } from '@svalmap/ui';
-import { RingMarker, TriangleMarker } from './LayerRow';
+import { SANCTION_EDGE, SHADOW_EDGE, TriangleMarker, WarningMarker } from './LayerRow';
 
 const SOURCE_LABELS: Record<string, string> = {
   aisstream: 'AISStream',
@@ -97,13 +97,13 @@ export default function VesselDossier({
         <div className="dossier-badges">
           {sanctioned && (
             <span className="dossier-badge sanction">
-              <RingMarker color="var(--sv-sanction)" />
+              <WarningMarker edge={SANCTION_EDGE} />
               Sanctioned · list match
             </span>
           )}
           {shadow && (
             <span className="dossier-badge shadow">
-              <RingMarker color="var(--sv-shadow)" dashed />
+              <WarningMarker edge={SHADOW_EDGE} />
               Shadow fleet · GUR list
             </span>
           )}
