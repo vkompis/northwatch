@@ -4,7 +4,14 @@ import { useEffect, useRef } from 'react';
 import { useMap } from '../hooks/useMap';
 import { mapStyleReady, safeGetLayer } from '../utils/mapSafe';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
-import { SEABED_DEM_TILES, registerSeabedProtocol } from '../utils/seabedDem';
+import {
+  KV_RELIEF_TILES,
+  SEABED_DEM_TILES,
+  registerKartverketReliefProtocol,
+  registerSeabedProtocol,
+  setKartverketReliefWater,
+} from '../utils/seabedDem';
+import { parseRgb } from '../utils/kartverketRelief';
 
 export type OverlayVisibility = {
   'eez-norway': boolean;
@@ -172,6 +179,14 @@ const BATHY_VEC_SOURCE = 'overlay-bathymetry-vector';
 const SEABED_DEM_SOURCE = 'overlay-seabed-dem';
 const MOVEABLE_RIG_SOURCE = 'overlay-petroleum-moveable';
 const SEABED_RELIEF_LAYER = 'overlay-seabed-relief';
+/**
+ * Kartverket's 50 / 25 / 5 m seabed hillshade where it has data (coast, MAREANO areas,
+ * survey lines), drawn opaque over the DEM relief in the same colours; elsewhere it is
+ * transparent and the DEM relief shows. Below z5 it adds nothing the DEM relief lacks.
+ */
+const KV_RELIEF_SOURCE = 'overlay-seabed-kartverket';
+const KV_RELIEF_LAYER = 'overlay-seabed-relief-kartverket';
+const SEABED_LAYERS = [SEABED_RELIEF_LAYER, KV_RELIEF_LAYER];
 /** Earlier ids: a DEM of its own, then a relief on the land+sea basemap terrain. */
 const LEGACY_BATHY_LAYERS = [
   'overlay-bathymetry-hillshade',
@@ -739,6 +754,36 @@ export default function OverlayLayers({
         );
       }
 
+      registerKartverketReliefProtocol();
+      setKartverketReliefWater(parseRgb(map.getPaintProperty('water-fill', 'fill-color')));
+      if (!map.getSource(KV_RELIEF_SOURCE)) {
+        map.addSource(KV_RELIEF_SOURCE, {
+          type: 'raster',
+          tiles: [KV_RELIEF_TILES],
+          tileSize: 256,
+          minzoom: 5,
+          maxzoom: 14,
+          attribution: 'Seabed relief: © <a href="https://kartverket.no/">Kartverket</a>',
+        });
+      }
+      if (!safeGetLayer(map, KV_RELIEF_LAYER)) {
+        // Directly above the DEM relief (which itself sits directly above the water fill)
+        const layers = map.getStyle()?.layers || [];
+        const relief = layers.findIndex((l) => l.id === SEABED_RELIEF_LAYER);
+        const beforeKv = relief >= 0 ? layers[relief + 1]?.id : beforeIdForSeabedRelief(map);
+        map.addLayer(
+          {
+            id: KV_RELIEF_LAYER,
+            type: 'raster',
+            source: KV_RELIEF_SOURCE,
+            minzoom: 5,
+            layout: { visibility: vis(visibility['seabed-relief']) },
+            paint: { 'raster-fade-duration': 0, 'raster-resampling': 'linear' },
+          },
+          beforeKv
+        );
+      }
+
       if (!map.getSource(BATHY_VEC_SOURCE)) {
         map.addSource(BATHY_VEC_SOURCE, {
           type: 'vector',
@@ -1258,8 +1303,8 @@ export default function OverlayLayers({
         map.setLayoutProperty(lid, 'visibility', bathyVis);
       }
     }
-    if (safeGetLayer(map, SEABED_RELIEF_LAYER)) {
-      map.setLayoutProperty(SEABED_RELIEF_LAYER, 'visibility', vis(visibility['seabed-relief']));
+    for (const lid of SEABED_LAYERS) {
+      if (safeGetLayer(map, lid)) map.setLayoutProperty(lid, 'visibility', vis(visibility['seabed-relief']));
     }
     if (visibility.bathymetry) {
       try {
