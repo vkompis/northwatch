@@ -1,7 +1,12 @@
 // Map components
 export { default as MapContainer } from './components/MapContainer';
 export { default as VesselLayer } from './components/VesselLayer';
-export type { VesselFeatureProps, VesselLayerStatus } from './components/VesselLayer';
+export type {
+  VesselFeatureProps,
+  VesselLayerStatus,
+  VesselTrack,
+  VesselScrub,
+} from './components/VesselLayer';
 export {
   mmsiCategory,
   mmsiFlagCountry,

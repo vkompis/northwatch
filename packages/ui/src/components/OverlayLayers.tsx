@@ -170,6 +170,7 @@ const SEASCAPE_BASE = 'https://tiles.openwaters.io/seascape';
 const BATHY_DEM_SOURCE = 'overlay-bathymetry-dem';
 const BATHY_VEC_SOURCE = 'overlay-bathymetry-vector';
 const SEABED_DEM_SOURCE = 'overlay-seabed-dem';
+const MOVEABLE_RIG_SOURCE = 'overlay-petroleum-moveable';
 const SEABED_RELIEF_LAYER = 'overlay-seabed-relief';
 /** Earlier ids: a DEM of its own, then a relief on the land+sea basemap terrain. */
 const LEGACY_BATHY_LAYERS = [
@@ -436,6 +437,10 @@ export type RigFeatureProps = {
   waterDepthM: number | null;
   updated: string | null;
   factPageUrl: string | null;
+  /** Moveable rigs only: the AIS vessel that places them (Sodir has no coordinates). */
+  mmsi?: string | null;
+  aisName?: string | null;
+  aisTimestamp?: string | null;
 };
 
 /** Pipeline line (Sodir active or legacy GeoNorge chart). */
@@ -504,6 +509,8 @@ export default function OverlayLayers({
   onRigRef.current = onRigSelect;
   const onPipelineRef = useRef(onPipelineSelect);
   onPipelineRef.current = onPipelineSelect;
+  const visibilityRef = useRef(visibility);
+  visibilityRef.current = visibility;
 
   useEffect(() => {
     let cancelled = false;
@@ -934,11 +941,49 @@ export default function OverlayLayers({
       });
     }
 
+    /** Rigs placed by AIS — they move, so the source is refreshed while the map is open. */
+    async function loadMoveableRigs() {
+      if (!mapStyleReady(map)) return;
+      const res = await fetch(`${apiBase}/api/petroleum/moveable`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (cancelled || !mapStyleReady(map)) return;
+      const existing = map.getSource(MOVEABLE_RIG_SOURCE) as any;
+      if (existing) {
+        existing.setData(data);
+        return;
+      }
+      const v = vis(visibilityRef.current.petroleum);
+      map.addSource(MOVEABLE_RIG_SOURCE, { type: 'geojson', data });
+      map.addLayer({
+        id: `${MOVEABLE_RIG_SOURCE}-circle`,
+        type: 'circle',
+        source: MOVEABLE_RIG_SOURCE,
+        layout: { visibility: v },
+        // Hollow ring: same orange as fixed facilities, but reads as "positioned by AIS"
+        paint: {
+          'circle-radius': PORT_CIRCLE_RADIUS,
+          'circle-color': '#1c1917',
+          'circle-opacity': 0.85,
+          'circle-stroke-width': 2.5,
+          'circle-stroke-color': '#f97316',
+        },
+      });
+      map.addLayer({
+        id: `${MOVEABLE_RIG_SOURCE}-hit`,
+        type: 'circle',
+        source: MOVEABLE_RIG_SOURCE,
+        layout: { visibility: v },
+        paint: { 'circle-radius': PORT_HIT_RADIUS, 'circle-opacity': 0, 'circle-stroke-width': 0 },
+      });
+    }
+
     async function boot() {
       try {
         await Promise.all(OVERLAYS.map((d) => loadOne(d).catch((e) => console.error(e))));
         await loadBathymetry().catch((e) => console.error('[bathymetry]', e));
         await loadPetroleumPoints();
+        await loadMoveableRigs().catch((e) => console.error('[rigs]', e));
         await loadTgLandings();
       } catch (e) {
         console.error('[OverlayLayers]', e);
@@ -1022,6 +1067,9 @@ export default function OverlayLayers({
         waterDepthM: depth,
         updated: strProp(p, 'updated', 'fclDateUpdated', 'oppdateringsdato'),
         factPageUrl: strProp(p, 'factPageUrl', 'fclFactPageUrl'),
+        mmsi: strProp(p, 'mmsi'),
+        aisName: strProp(p, 'aisName'),
+        aisTimestamp: strProp(p, 'aisTimestamp'),
       });
     };
 
@@ -1072,6 +1120,8 @@ export default function OverlayLayers({
     const rigLayers = [
       'overlay-petroleum-points-hit',
       'overlay-petroleum-points-circle',
+      `${MOVEABLE_RIG_SOURCE}-hit`,
+      `${MOVEABLE_RIG_SOURCE}-circle`,
     ];
     const pipelineLayers = [
       'overlay-pipelines-hit',
@@ -1105,10 +1155,14 @@ export default function OverlayLayers({
       bindClicks();
     });
     const bindTimer = setInterval(bindClicks, 2000);
+    const rigTimer = setInterval(() => {
+      loadMoveableRigs().catch(() => undefined);
+    }, 2 * 60_000);
 
     return () => {
       cancelled = true;
       clearInterval(bindTimer);
+      clearInterval(rigTimer);
       map.off('load', start);
       map.off('idle', start);
       for (const lid of cableLayers) {
@@ -1168,6 +1222,9 @@ export default function OverlayLayers({
       } catch {
         /* ignore */
       }
+    }
+    for (const lid of [`${MOVEABLE_RIG_SOURCE}-circle`, `${MOVEABLE_RIG_SOURCE}-hit`]) {
+      if (safeGetLayer(map, lid)) map.setLayoutProperty(lid, 'visibility', vis(visibility.petroleum));
     }
     const petroHit = 'overlay-petroleum-points-hit';
     if (safeGetLayer(map, petroHit)) {

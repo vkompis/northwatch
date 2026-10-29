@@ -47,6 +47,30 @@ function epochToIso(v: unknown): string | null {
   }
 }
 
+/** Sodir attribute record → the facility properties the map's rig card reads. */
+function mapProps(p: any): Record<string, unknown> | null {
+  const id = p.fclNpdidFacility != null ? String(p.fclNpdidFacility) : null;
+  const name = p.fclName ? String(p.fclName).trim() : null;
+  if (!name && !id) return null;
+  return {
+    id: id || name,
+    name: name || `Facility ${id}`,
+    kind: p.fclKind ? String(p.fclKind).trim() : null,
+    phase: p.fclPhase ? String(p.fclPhase) : null,
+    fixedOrMoveable: p.fclFixedOrMoveable ? String(p.fclFixedOrMoveable) : null,
+    operator: p.fclCurrentOperatorName ? String(p.fclCurrentOperatorName) : null,
+    belongsTo: p.fclBelongsToName ? String(p.fclBelongsToName) : null,
+    functions: p.fclFunctions ? String(p.fclFunctions) : null,
+    status: p.fclStatus ? String(p.fclStatus) : null,
+    waterDepthM:
+      p.fclWaterDepth != null && p.fclWaterDepth !== '' ? Number(p.fclWaterDepth) : null,
+    updated: epochToIso(p.fclDateUpdated),
+    factPageUrl: p.fclFactPageUrl ? String(p.fclFactPageUrl) : null,
+    surface: p.fclSurface ? String(p.fclSurface) : 'Y',
+    source: 'sodir-factmaps',
+  };
+}
+
 function mapFeature(f: any): any | null {
   const geom = f?.geometry;
   const p = f?.properties || f?.attributes || {};
@@ -63,42 +87,23 @@ function mapFeature(f: any): any | null {
   if (!coordinates || !Number.isFinite(coordinates[0]) || !Number.isFinite(coordinates[1])) {
     return null;
   }
-  const id = p.fclNpdidFacility != null ? String(p.fclNpdidFacility) : null;
-  const name = p.fclName ? String(p.fclName).trim() : null;
-  if (!name && !id) return null;
-  return {
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates },
-    properties: {
-      id: id || name,
-      name: name || `Facility ${id}`,
-      kind: p.fclKind ? String(p.fclKind) : null,
-      phase: p.fclPhase ? String(p.fclPhase) : null,
-      fixedOrMoveable: p.fclFixedOrMoveable ? String(p.fclFixedOrMoveable) : null,
-      operator: p.fclCurrentOperatorName ? String(p.fclCurrentOperatorName) : null,
-      belongsTo: p.fclBelongsToName ? String(p.fclBelongsToName) : null,
-      functions: p.fclFunctions ? String(p.fclFunctions) : null,
-      status: p.fclStatus ? String(p.fclStatus) : null,
-      waterDepthM:
-        p.fclWaterDepth != null && p.fclWaterDepth !== ''
-          ? Number(p.fclWaterDepth)
-          : null,
-      updated: epochToIso(p.fclDateUpdated),
-      factPageUrl: p.fclFactPageUrl ? String(p.fclFactPageUrl) : null,
-      surface: p.fclSurface ? String(p.fclSurface) : 'Y',
-      source: 'sodir-factmaps',
-    },
-  };
+  const properties = mapProps(p);
+  if (!properties) return null;
+  return { type: 'Feature', geometry: { type: 'Point', coordinates }, properties };
 }
 
-async function fetchPage(offset: number): Promise<{
+async function fetchPage(
+  offset: number,
+  where = WHERE,
+  returnGeometry = true
+): Promise<{
   features: any[];
   exceeded?: boolean;
 }> {
   const q = new URLSearchParams({
-    where: WHERE,
+    where,
     outFields: OUT_FIELDS,
-    returnGeometry: 'true',
+    returnGeometry: String(returnGeometry),
     outSR: '4326',
     orderByFields: 'OBJECTID',
     resultOffset: String(offset),
@@ -166,6 +171,41 @@ export async function fetchSodirFacilitiesToFile(
     };
     fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
     return { ok: true, featureCount: mapped.length, path: geoPath, meta };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * Moveable surface units (drilling rigs, flotels, intervention vessels). FactMaps has no
+ * coordinates for them, so this is a register only — the API places them by AIS name.
+ */
+const MOVEABLE_WHERE = "fclSurface='Y' AND fclFixedOrMoveable='MOVEABLE'";
+export const MOVEABLE_FILE = 'petroleum-moveable.json';
+
+export async function fetchSodirMoveableToFile(outDir: string): Promise<SodirFetchResult> {
+  try {
+    const all: any[] = [];
+    let offset = 0;
+    for (let page = 0; page < 5; page++) {
+      const { features, exceeded } = await fetchPage(offset, MOVEABLE_WHERE, false);
+      all.push(...features);
+      if (features.length === 0 || !exceeded) break;
+      offset += features.length;
+    }
+    const units = all.map((f) => mapProps(f?.attributes || {})).filter(Boolean);
+    fs.mkdirSync(outDir, { recursive: true });
+    const file = path.join(outDir, MOVEABLE_FILE);
+    const meta = {
+      source: 'sodir-factmaps',
+      layer: 'FactMapsWGS84/304 Facilities, in place (surface)',
+      where: MOVEABLE_WHERE,
+      generated_at: new Date().toISOString(),
+      unit_count: units.length,
+    };
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ meta, units }));
+    fs.renameSync(`${file}.tmp`, file);
+    return { ok: true, featureCount: units.length, path: file, meta };
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
   }

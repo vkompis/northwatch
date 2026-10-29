@@ -12,6 +12,8 @@ import {
   type VesselFeatureProps,
   type GfwEventProps,
   type VesselLayerStatus,
+  type VesselTrack,
+  type VesselScrub,
   type CableFeatureProps,
   type PortFeatureProps,
   type RigFeatureProps,
@@ -49,6 +51,9 @@ type Props = {
   onDeselect?: () => void;
   onVesselStatus?: (status: VesselLayerStatus) => void;
   onVesselsChange?: (vessels: VesselFeatureProps[]) => void;
+  onTrack?: (track: VesselTrack | null) => void;
+  onNavWarningsData?: (data: { onMap: number; notices: NavWarningProps[] }) => void;
+  scrub?: VesselScrub | null;
 };
 
 export default function MapCanvas({
@@ -79,6 +84,9 @@ export default function MapCanvas({
   onDeselect,
   onVesselStatus,
   onVesselsChange,
+  onTrack,
+  onNavWarningsData,
+  scrub = null,
 }: Props) {
   return (
     <MapContainer
@@ -97,8 +105,9 @@ export default function MapCanvas({
         onPipelineSelect={onPipelineSelect}
       />
       <IncidentLayer
-        showActive={overlays.navwarnings}
-        showRecent30d={overlays['navwarnings-30d']}
+        // The feed only has in-force warnings, so "last 30 days" was the same set — one toggle
+        showActive={overlays.navwarnings || overlays['navwarnings-30d']}
+        onData={onNavWarningsData}
         interactive={!drawingAoi}
         onWarningSelect={drawingAoi ? undefined : onNavWarningSelect}
       />
@@ -114,6 +123,8 @@ export default function MapCanvas({
         onDeselect={drawingAoi ? undefined : onDeselect}
         onStatus={onVesselStatus}
         onVesselsChange={onVesselsChange}
+        onTrack={onTrack}
+        scrub={scrub}
       />
       <GfwLayers
         visibility={gfw}

@@ -54,6 +54,28 @@ export type VesselFeatureProps = {
   lat: number | null;
 };
 
+/** Historic fixes behind the selected vessel's track line (for the timeline). */
+export type VesselTrack = {
+  mmsi: string;
+  days: number;
+  /** Sampling interval the track was requested with, minutes */
+  intervalMin: number;
+  points: { t: number; lon: number; lat: number; speed: number | null; course: number | null }[];
+};
+
+/** A moment picked on the timeline, drawn as a ghost marker on the map. */
+export type VesselScrub = {
+  lon: number;
+  lat: number;
+  label: string;
+  /** No fix near this moment — the marker shows the last known position. */
+  stale?: boolean;
+  /** Pan the map when the marker leaves the view (picked or playing, not hover). */
+  follow?: boolean;
+  /** Screen edges covered by panels, px — the marker is kept inside what is left. */
+  padding?: { top: number; right: number; bottom: number; left: number };
+};
+
 export type VesselLayerStatus = {
   vesselCount: number;
   lastUpdate: string | null;
@@ -84,6 +106,10 @@ type Props = {
    * the vessel is not in the live feed (search hit outside coverage, GFW handoff).
    */
   selectedFallback?: { mmsi: string; label?: string | null; lon: number | null; lat: number | null } | null;
+  /** Called with the loaded track (or null when cleared / failed). */
+  onTrack?: (track: VesselTrack | null) => void;
+  /** Position picked on the timeline (null hides the marker). */
+  scrub?: VesselScrub | null;
 };
 
 const MARKER_IMAGES: { name: string; url: string }[] = [
@@ -315,6 +341,8 @@ export default function VesselLayer({
   flyToSelected = true,
   watchlistMmsis,
   selectedFallback = null,
+  onTrack,
+  scrub = null,
 }: Props) {
   const map = useMap();
   const apiBase =
@@ -327,6 +355,8 @@ export default function VesselLayer({
   onStatusRef.current = onStatus;
   const onVesselsRef = useRef(onVesselsChange);
   onVesselsRef.current = onVesselsChange;
+  const onTrackRef = useRef(onTrack);
+  onTrackRef.current = onTrack;
   const clearTrackRef = useRef<(() => void) | null>(null);
   const showTrackRef = useRef<((mmsi: string) => Promise<void>) | null>(null);
   const showProjectionRef = useRef<((mmsi: string) => void) | null>(null);
@@ -353,6 +383,9 @@ export default function VesselLayer({
   const selectedFallbackRef = useRef(selectedFallback);
   selectedFallbackRef.current = selectedFallback;
   const showSelectedRef = useRef<(() => void) | null>(null);
+  const scrubRef = useRef(scrub);
+  scrubRef.current = scrub;
+  const showScrubRef = useRef<(() => void) | null>(null);
   const applyFilterRef = useRef<(() => void) | null>(null);
   const allFeaturesRef = useRef<any[]>([]);
   /** MMSI the camera last flew to — deep links resolve before the vessel list arrives. */
@@ -385,6 +418,8 @@ export default function VesselLayer({
     const projSourceId = 'vessel-projection';
     const selSourceId = 'vessel-selected';
     const selLayerIds = ['vessel-selected-glow', 'vessel-selected-ring', 'vessel-selected-label'];
+    const scrubSourceId = 'vessel-scrub';
+    const scrubLayerIds = ['vessel-scrub-halo', 'vessel-scrub-dot', 'vessel-scrub-label'];
     const projLayerIds = ['vessel-projection-rings', 'vessel-projection-labels'];
     let trackAbort: AbortController | undefined;
     let activeTrackMmsi: string | null = null;
@@ -576,6 +611,7 @@ export default function VesselLayer({
         /* ignore */
       }
       emitStatus({ trackStatus: 'idle', trackError: null });
+      onTrackRef.current?.(null);
     }
     clearTrackRef.current = clearTrack;
 
@@ -836,6 +872,95 @@ export default function VesselLayer({
     }
     showSelectedRef.current = showSelected;
 
+    /** Ghost marker for the moment picked on the timeline; dashed when it is the last known fix. */
+    function showScrub() {
+      if (!mapStyleReady(map)) return;
+      const sc = scrubRef.current;
+      if (!map.getSource(scrubSourceId)) {
+        map.addSource(scrubSourceId, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addLayer({
+          id: 'vessel-scrub-halo',
+          type: 'circle',
+          source: scrubSourceId,
+          paint: {
+            'circle-radius': 10,
+            'circle-color': 'rgba(0, 0, 0, 0)',
+            'circle-stroke-color': '#e7a54a',
+            'circle-stroke-width': 2,
+            'circle-stroke-opacity': ['case', ['==', ['get', 'stale'], 1], 0.55, 1],
+          },
+        });
+        map.addLayer({
+          id: 'vessel-scrub-dot',
+          type: 'circle',
+          source: scrubSourceId,
+          paint: {
+            'circle-radius': 3.5,
+            'circle-color': '#e7a54a',
+            'circle-opacity': ['case', ['==', ['get', 'stale'], 1], 0.4, 1],
+          },
+        });
+        map.addLayer({
+          id: 'vessel-scrub-label',
+          type: 'symbol',
+          source: scrubSourceId,
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-font': MAP_FONT_BOLD,
+            'text-size': 11.5,
+            'text-anchor': 'bottom',
+            'text-offset': [0, -1.3],
+            'text-allow-overlap': true,
+            'text-ignore-placement': true,
+          },
+          paint: {
+            'text-color': '#f2c27f',
+            'text-halo-color': 'rgba(4, 10, 20, 0.95)',
+            'text-halo-width': 2,
+          },
+        });
+      }
+      (map.getSource(scrubSourceId) as any)?.setData({
+        type: 'FeatureCollection',
+        features: sc
+          ? [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [sc.lon, sc.lat] },
+                properties: { label: sc.label, stale: sc.stale ? 1 : 0 },
+              },
+            ]
+          : [],
+      });
+      for (const id of scrubLayerIds) {
+        try {
+          if (map.getLayer(id)) map.moveLayer(id);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (sc?.follow) {
+        const pad = sc.padding || { top: 0, right: 0, bottom: 0, left: 0 };
+        const p = map.project([sc.lon, sc.lat]);
+        const c = map.getCanvas();
+        const margin = 60;
+        const outside =
+          p.x < pad.left + margin ||
+          p.y < pad.top + margin ||
+          p.x > c.clientWidth - pad.right - margin ||
+          p.y > c.clientHeight - pad.bottom - margin;
+        if (outside && !map.isMoving()) {
+          // Centre in the uncovered part of the map, not behind a panel
+          map.easeTo({
+            center: [sc.lon, sc.lat],
+            offset: [(pad.left - pad.right) / 2, (pad.top - pad.bottom) / 2],
+            duration: 450,
+          });
+        }
+      }
+    }
+    showScrubRef.current = showScrub;
+
     function ensureTrackLayers() {
       if (!map.getSource(trackSourceId)) {
         map.addSource(trackSourceId, {
@@ -889,9 +1014,10 @@ export default function VesselLayer({
       emitStatus({ trackStatus: 'loading', trackError: null, trackDays: days });
       const controller = new AbortController();
       trackAbort = controller;
+      const intervalMin = days > 3 ? 30 : 15;
       try {
         const { data } = await axios.get(`${apiBase}/api/tracks24h`, {
-          params: { mmsi, interval: days > 3 ? 30 : 15, days },
+          params: { mmsi, interval: intervalMin, days },
           timeout: 60000,
           signal: controller.signal as any,
         });
@@ -906,6 +1032,28 @@ export default function VesselLayer({
           });
         }
         const pts = data?.points?.features;
+        onTrackRef.current?.({
+          mmsi,
+          days,
+          intervalMin,
+          points: (Array.isArray(pts) ? pts : [])
+            .map((f: any) => {
+              const p = f?.properties || {};
+              const c = f?.geometry?.coordinates || [];
+              const n = (v: unknown) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+              return {
+                t: Date.parse(String(p.time ?? '')),
+                lon: Number(c[0]),
+                lat: Number(c[1]),
+                speed: n(p.speed),
+                course: n(p.course),
+              };
+            })
+            .filter((p: { t: number; lon: number; lat: number }) =>
+              Number.isFinite(p.t) && Number.isFinite(p.lon) && Number.isFinite(p.lat)
+            )
+            .sort((a: { t: number }, b: { t: number }) => a.t - b.t),
+        });
         if (Array.isArray(pts)) {
           for (const f of pts) {
             if (!f?.geometry?.coordinates) continue;
@@ -939,6 +1087,7 @@ export default function VesselLayer({
       } catch (e: any) {
         if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return;
         console.warn('[VesselLayer] track fetch failed', mmsi, e?.message || e);
+        onTrackRef.current?.({ mmsi, days, intervalMin, points: [] });
         emitStatus({ trackStatus: 'error', trackError: e?.message || 'Track unavailable' });
       }
     }
@@ -1166,6 +1315,13 @@ export default function VesselLayer({
           if (!interactiveRef.current) return;
           const f = nearestFeature(map, e.features, e.point);
           if (!f?.properties || !onSelectRef.current) return;
+          // A moveable rig sits on its own AIS position — its card wins (it links to the vessel)
+          if (map.getLayer('overlay-petroleum-moveable-hit')) {
+            const rigHit = map
+              .queryRenderedFeatures(e.point, { layers: ['overlay-petroleum-moveable-hit'] })
+              .some((r: any) => String(r.properties?.mmsi) === String(f.properties.mmsi));
+            if (rigHit) return;
+          }
           e.originalEvent?.stopPropagation?.();
           hideHover();
           const p = f.properties as Record<string, unknown>;
@@ -1263,6 +1419,8 @@ export default function VesselLayer({
             'overlay-ports-circle',
             'overlay-petroleum-points-hit',
             'overlay-petroleum-points-circle',
+            'overlay-petroleum-moveable-hit',
+            'overlay-petroleum-moveable-circle',
             'overlay-pipelines-hit',
             'overlay-pipelines-old-hit',
             'nav-warnings-fill',
@@ -1313,6 +1471,8 @@ export default function VesselLayer({
           flyToVessel(sel);
         }
         showSelected();
+        // Keep the timeline marker above the selection highlight
+        if (scrubRef.current) showScrub();
         emitStatus({
           lastUpdate: new Date().toISOString(),
           error: null,
@@ -1380,10 +1540,11 @@ export default function VesselLayer({
       for (const id of [...trackLayerIds].reverse()) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
-      for (const id of [...projLayerIds, ...selLayerIds].reverse()) {
+      for (const id of [...projLayerIds, ...selLayerIds, ...scrubLayerIds].reverse()) {
         if (map.getLayer(id)) map.removeLayer(id);
       }
       if (map.getSource(selSourceId)) map.removeSource(selSourceId);
+      if (map.getSource(scrubSourceId)) map.removeSource(scrubSourceId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       if (map.getSource(trackSourceId)) map.removeSource(trackSourceId);
       if (map.getSource(projSourceId)) map.removeSource(projSourceId);
@@ -1429,6 +1590,10 @@ export default function VesselLayer({
     // Unknown position yet (deep link before first refresh) → refresh() flies once it lands
     flyToVesselRef.current?.(selectedMmsi);
   }, [selectedMmsi, trackDays, map]);
+
+  useEffect(() => {
+    showScrubRef.current?.();
+  }, [scrub]);
 
   // Position / name for vessels outside the live feed can arrive after the selection
   useEffect(() => {

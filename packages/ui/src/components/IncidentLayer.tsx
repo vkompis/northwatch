@@ -17,6 +17,14 @@ export type NavWarningProps = {
   issued: string | null;
   updated_at: string | null;
   recent?: boolean;
+  /** Coastal warnings: original Norwegian text */
+  messageNo?: string | null;
+  /** Norwegian chart number (coastal) */
+  chart?: string | null;
+  /** In force but not drawn: Kystverket's whole-NAVAREA "general position" */
+  areaWide?: boolean;
+  /** False for warnings listed beside the map (area-wide or no position) */
+  onMap?: boolean;
 };
 
 type Props = {
@@ -26,6 +34,8 @@ type Props = {
   showRecent30d?: boolean;
   interactive?: boolean;
   onWarningSelect?: (warning: NavWarningProps) => void;
+  /** After each load: how many are drawn, and the in-force ones with no map position. */
+  onData?: (data: { onMap: number; notices: NavWarningProps[] }) => void;
 };
 
 const LAYER_IDS = [
@@ -36,7 +46,11 @@ const LAYER_IDS = [
 ] as const;
 
 function propsFromFeature(f: any): NavWarningProps | null {
-  const p = f?.properties || {};
+  const w = warningFromProps(f?.properties || {});
+  return w && { ...w, onMap: true };
+}
+
+function warningFromProps(p: any): NavWarningProps | null {
   const title = String(p.title || '').trim();
   if (!title && p.eventid == null) return null;
   return {
@@ -50,6 +64,9 @@ function propsFromFeature(f: any): NavWarningProps | null {
     issued: p.issued != null ? String(p.issued) : null,
     updated_at: p.updated_at != null ? String(p.updated_at) : null,
     recent: Number(p.recent) === 1 || p.recent === true,
+    messageNo: p.messageNo != null && String(p.messageNo) !== '' ? String(p.messageNo) : null,
+    chart: p.chart != null && String(p.chart) !== '' ? String(p.chart) : null,
+    areaWide: p.areaWide === true || p.areaWide === 'true',
   };
 }
 
@@ -62,6 +79,7 @@ export default function IncidentLayer({
   showRecent30d = false,
   interactive = true,
   onWarningSelect,
+  onData,
 }: Props) {
   const map = useMap();
   const apiBase =
@@ -74,6 +92,8 @@ export default function IncidentLayer({
   interactiveRef.current = interactive;
   const onSelectRef = useRef(onWarningSelect);
   onSelectRef.current = onWarningSelect;
+  const onDataRef = useRef(onData);
+  onDataRef.current = onData;
 
   const applyVisibilityAndFilter = () => {
     if (!mapStyleReady(map)) return;
@@ -217,10 +237,13 @@ export default function IncidentLayer({
           bindClicks();
         }
         applyVisibilityAndFilter();
-        console.log(
-          `[IncidentLayer] nav warnings features=${gj.features.length}`,
-          payload?.meta || ''
-        );
+        onDataRef.current?.({
+          onMap: gj.features.length,
+          notices: (Array.isArray(payload?.notices) ? payload.notices : [])
+            .map(warningFromProps)
+            .filter((w: NavWarningProps | null): w is NavWarningProps => !!w)
+            .map((w: NavWarningProps) => ({ ...w, onMap: false })),
+        });
       } catch (e) {
         console.warn('[IncidentLayer] nav warnings failed', e);
       }

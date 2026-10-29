@@ -36,7 +36,11 @@ import {
   upsertServerAlert,
 } from './alertMail';
 import { startAlertWatcher } from './alertWatcher';
-import { fetchSodirFacilitiesToFile } from './fetchSodirFacilities';
+import {
+  fetchSodirFacilitiesToFile,
+  fetchSodirMoveableToFile,
+  MOVEABLE_FILE,
+} from './fetchSodirFacilities';
 import { fetchSodirPipelinesToFile } from './fetchSodirPipelines';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
@@ -699,30 +703,69 @@ function parseWktGeometry(wkt: string | null | undefined): any | null {
   return null;
 }
 
-function warningToFeature(w: any, kind: 'navarea' | 'coastal') {
-  const geometry = parseWktGeometry(w?.position);
-  if (!geometry) return null;
-  const issued = w.dtg_timestamp || w.updated_at || null;
-  const recent = withinLastDays(issued, NAVWARNINGS_LOOKBACK_MS) ? 1 : 0;
+/** Kystverket timestamps carry no zone; they are UTC (DTG). */
+function kystverketUtc(v: unknown): string | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  return /([zZ]|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s}Z`;
+}
+
+function cleanWarningText(v: unknown): string | null {
+  if (v == null || v === '') return null;
+  return String(v)
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+/**
+ * Kystverket gives warnings without a position of their own the whole NAVAREA XIX as a
+ * "general position". Drawn, that is a red sheet over the Norwegian Sea and the Arctic.
+ */
+function isAreaWideGeometry(geometry: any): boolean {
+  if (geometry?.type !== 'Polygon') return false;
+  const ring: number[][] = geometry.coordinates?.[0] || [];
+  const lons = ring.map((c) => c[0]);
+  const lats = ring.map((c) => c[1]);
+  return Math.max(...lons) - Math.min(...lons) > 30 || Math.max(...lats) - Math.min(...lats) > 15;
+}
+
+function warningProps(w: any, kind: 'navarea' | 'coastal') {
+  const issued = kystverketUtc(w.dtg_timestamp || w.updated_at);
   return {
-    type: 'Feature',
-    geometry,
-    properties: {
-      kind,
-      eventid: w.eventid,
-      status: w.status || 'active',
-      warningnumber: w.warningnumber || null,
-      title:
-        kind === 'navarea'
-          ? `NAVAREA XIX ${w.warningnumber || ''}`.trim()
-          : `Coastal ${w.warningnumber || w.location || ''}`.trim(),
-      message: w.message_en || w.message_no || null,
-      location: w.location || null,
-      issued,
-      updated_at: w.updated_at || null,
-      recent,
-    },
+    kind,
+    eventid: w.eventid,
+    status: w.status || 'active',
+    warningnumber: w.warningnumber || null,
+    title:
+      kind === 'navarea'
+        ? `NAVAREA XIX ${w.warningnumber || ''}`.trim()
+        : `Coastal ${w.warningnumber || w.location || ''}`.trim(),
+    message: cleanWarningText(w.message_en || w.message_no),
+    messageNo: kind === 'coastal' ? cleanWarningText(w.message_no) : null,
+    location: w.location || null,
+    chart: w.norwegianchart || null,
+    issued,
+    updated_at: kystverketUtc(w.updated_at),
+    recent: withinLastDays(issued, NAVWARNINGS_LOOKBACK_MS) ? 1 : 0,
   };
+}
+
+/** "Message 128/26 is cancelled", "warning 125/26 is cancelled", "This message is also cancelled". */
+function cancelledWarningNumbers(warnings: any[]): Set<string> {
+  const out = new Set<string>();
+  for (const w of warnings) {
+    const text = String(w?.message_en || w?.message_no || '');
+    for (const m of text.matchAll(/(\d{1,4}\/\d{2,4})\s+is\s+cancell?ed/gi)) out.add(m[1]);
+    if (/this message is (also )?cancell?ed/i.test(text) && w?.warningnumber) {
+      out.add(String(w.warningnumber));
+    }
+  }
+  return out;
 }
 
 function withinLastDays(iso: string | null | undefined, daysMs: number): boolean {
@@ -735,6 +778,7 @@ function withinLastDays(iso: string | null | undefined, daysMs: number): boolean
 async function fetchNavWarningsGeoJSON(): Promise<{
   type: 'FeatureCollection';
   features: any[];
+  notices: any[];
   meta: any;
 }> {
   const [navareaRes, coastalRes] = await Promise.all([
@@ -743,29 +787,40 @@ async function fetchNavWarningsGeoJSON(): Promise<{
   ]);
   const navarea = Array.isArray(navareaRes.data) ? navareaRes.data : [];
   const coastal = Array.isArray(coastalRes.data) ? coastalRes.data : [];
+  // The feed still lists warnings that a later message cancelled (or that cancel themselves)
+  const cancelled = cancelledWarningNumbers([...navarea, ...coastal]);
   const features: any[] = [];
-  for (const w of navarea) {
-    // Public API only returns currently active warnings (no cancelled archive).
-    const f = warningToFeature(w, 'navarea');
-    if (f) features.push(f);
+  /** In force, but nothing to draw: area-wide general position, or no position at all. */
+  const notices: any[] = [];
+  for (const [list, kind] of [
+    [navarea, 'navarea'],
+    [coastal, 'coastal'],
+  ] as const) {
+    for (const w of list) {
+      if (w?.warningnumber && cancelled.has(String(w.warningnumber))) continue;
+      const properties = warningProps(w, kind);
+      const geometry = parseWktGeometry(w?.position);
+      if (!geometry || isAreaWideGeometry(geometry)) {
+        notices.push({ ...properties, areaWide: Boolean(geometry) });
+        continue;
+      }
+      features.push({ type: 'Feature', geometry, properties });
+    }
   }
-  for (const w of coastal) {
-    const f = warningToFeature(w, 'coastal');
-    if (f) features.push(f);
-  }
-  const recentCount = features.filter((f) => f.properties?.recent === 1).length;
   return {
     type: 'FeatureCollection',
     features,
+    notices,
     meta: {
       source: 'Kystverket Data API',
       note:
-        'Public API exposes currently active NAVAREA XIX + coastal warnings only (no cancelled archive). Use scope=active for all in-force, scope=recent for issued within 30 days.',
+        'Currently active NAVAREA XIX + coastal warnings (no archive). Cancelled warnings are dropped; area-wide and position-less ones are listed as notices.',
       lookbackDays: 30,
       navareaActive: navarea.length,
       coastalActive: coastal.length,
-      withGeometry: features.length,
-      recentIssuedCount: recentCount,
+      onMap: features.length,
+      notices: notices.length,
+      cancelled: [...cancelled],
     },
   };
 }
@@ -783,6 +838,7 @@ app.get('/api/navwarnings', async (req, res) => {
       data = {
         ...data,
         features: (data.features || []).filter((f: any) => f?.properties?.recent === 1),
+        notices: (data.notices || []).filter((n: any) => n?.recent === 1),
       };
     }
     // scope=active|all → full in-force set
@@ -994,10 +1050,14 @@ async function refreshPetroleum(reason: string): Promise<{
   petroleumRefreshing = true;
   console.log(`[petroleum/sodir] refresh (${reason})…`);
   try {
-    const [facilities, pipelines] = await Promise.all([
+    const [facilities, pipelines, moveable] = await Promise.all([
       fetchSodirFacilitiesToFile(OVERLAYS_DIR),
       fetchSodirPipelinesToFile(OVERLAYS_DIR),
+      fetchSodirMoveableToFile(OVERLAYS_DIR),
     ]);
+    // The rig register is a nice-to-have: log, don't fail the refresh
+    if (!moveable.ok) console.warn('[petroleum/sodir] moveable units failed', moveable.error);
+    else MOVEABLE_RIGS_CACHE = null;
     if (!facilities.ok) {
       console.warn('[petroleum/sodir] facilities refresh failed', facilities.error);
       return { ok: false, error: facilities.error };
@@ -1038,6 +1098,105 @@ app.get('/api/petroleum/status', (_req, res) => {
     },
     url: '/overlays/petroleum.geojson',
   });
+});
+
+/**
+ * Moveable rigs (semisubs, jack-ups, flotels) from the Sodir register, placed at the
+ * AIS position of the vessel with the same name. Dive/intervention "VESSEL" units are
+ * left out — they already show up as ordinary ships.
+ */
+const MOVEABLE_PATH = path.join(OVERLAYS_DIR, MOVEABLE_FILE);
+let MOVEABLE_RIGS_CACHE: { at: number; body: any } | null = null;
+
+function rigNameKey(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/Æ/g, 'AE')
+    .replace(/Ø/g, 'O')
+    .replace(/Å/g, 'A')
+    .normalize('NFKD')
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+/** Same name on a cargo ship or trawler is a namesake, not the rig. */
+const NOT_A_RIG = /cargo|tanker|fishing|passenger|pleasure|sailing|tug|pilot|high speed/i;
+
+function readMoveableUnits(): any[] {
+  try {
+    if (!fs.existsSync(MOVEABLE_PATH)) return [];
+    const data = JSON.parse(fs.readFileSync(MOVEABLE_PATH, 'utf8'));
+    return Array.isArray(data?.units) ? data.units : [];
+  } catch {
+    return [];
+  }
+}
+
+async function buildMoveableRigs() {
+  const live = await getLivePositionsList();
+  const onMap = new Set(live.map((v) => v.mmsi));
+  const byKey = new Map<string, any[]>();
+  for (const v of [...live, ...allKnownVessels().filter((x) => !onMap.has(x.mmsi))]) {
+    const name = String(v.vessel_name || '').trim();
+    if (!name) continue;
+    const key = rigNameKey(name);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(v);
+  }
+  // AIS names stop at 20 characters; long Sodir names match on that prefix
+  const truncated = [...byKey.entries()].filter(([, vs]) =>
+    vs.some((v) => String(v.vessel_name).trim().length >= 19)
+  );
+
+  const rigs = readMoveableUnits().filter(
+    (u) => u.phase === 'IN SERVICE' && !/VESSEL/i.test(String(u.kind || ''))
+  );
+  const features: any[] = [];
+  const unmatched: string[] = [];
+  for (const u of rigs) {
+    const key = rigNameKey(String(u.name || ''));
+    const candidates = [
+      ...(byKey.get(key) || []),
+      ...truncated.filter(([k]) => k !== key && key.startsWith(k)).flatMap(([, vs]) => vs),
+    ];
+    const best = candidates.sort(
+      (a, b) =>
+        Number(NOT_A_RIG.test(a.shipType || '')) - Number(NOT_A_RIG.test(b.shipType || '')) ||
+        Number(!onMap.has(a.mmsi)) - Number(!onMap.has(b.mmsi)) ||
+        String(b.timestamp || '').localeCompare(String(a.timestamp || ''))
+    )[0];
+    if (!best) {
+      unmatched.push(u.name);
+      continue;
+    }
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [best.lon, best.lat] },
+      properties: {
+        ...u,
+        mmsi: best.mmsi,
+        aisName: best.vessel_name,
+        aisTimestamp: best.timestamp || null,
+        aisOnMap: onMap.has(best.mmsi),
+        source: 'sodir-factmaps+ais',
+      },
+    });
+  }
+  return {
+    type: 'FeatureCollection',
+    features,
+    meta: { rigsInService: rigs.length, placed: features.length, unmatched },
+  };
+}
+
+app.get('/api/petroleum/moveable', async (_req, res) => {
+  try {
+    if (!MOVEABLE_RIGS_CACHE || Date.now() - MOVEABLE_RIGS_CACHE.at > 60_000) {
+      MOVEABLE_RIGS_CACHE = { at: Date.now(), body: await buildMoveableRigs() };
+    }
+    res.json(MOVEABLE_RIGS_CACHE.body);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
 });
 
 app.post('/api/petroleum/refresh', async (_req, res) => {
@@ -3530,6 +3689,12 @@ app.listen(PORT, () => {
     const staleAge = (age: number | null) =>
       age == null || !Number.isFinite(age) || age > 7 * 24 * 3600e3;
     const stale = notSodir || staleAge(ageMs) || staleAge(pipeAgeMs);
+    if (!stale && !fs.existsSync(MOVEABLE_PATH)) {
+      // Rig register is newer than the facility cache — fetch it on its own
+      fetchSodirMoveableToFile(OVERLAYS_DIR).then((r) =>
+        console.log(`[petroleum/sodir] moveable units ok=${r.ok} count=${r.featureCount ?? 0}`)
+      );
+    }
     if (stale) {
       refreshPetroleum('startup').catch((e) =>
         console.warn('[petroleum/sodir] startup failed', e)

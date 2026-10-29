@@ -16,6 +16,7 @@ import {
   vesselCategoryKey,
   vesselShipClass,
 } from '@svalmap/ui';
+import LayerRow, { RingMarker, TriangleMarker } from './LayerRow';
 
 const CATEGORY_LABELS: Record<VesselCategory, string> = {
   norway: 'Norwegian',
@@ -26,38 +27,6 @@ const CATEGORY_LABELS: Record<VesselCategory, string> = {
   military: 'Military & law enforcement',
   research: 'Research (Russian list)',
 };
-
-function FilterRow({
-  label,
-  checked,
-  onChange,
-  count,
-  swatch,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (on: boolean) => void;
-  count?: number;
-  swatch?: string;
-}) {
-  return (
-    <label className="item item-toggle">
-      <span className="label">
-        {label}
-        {count != null && <span className="filter-count">{count.toLocaleString()}</span>}
-      </span>
-      {swatch ? (
-        <span className="filter-swatch" style={{ background: swatch }} aria-hidden />
-      ) : (
-        <span className="menu-icon-slot" aria-hidden />
-      )}
-      <span className="item-control">
-        {/* Boolean(): state restored from an older prefs shape can lack newer keys */}
-        <input type="checkbox" checked={Boolean(checked)} onChange={(e) => onChange(e.target.checked)} />
-      </span>
-    </label>
-  );
-}
 
 export default function VesselFilterPanel({
   filters,
@@ -70,7 +39,6 @@ export default function VesselFilterPanel({
   vessels: VesselFeatureProps[];
   watchlistMmsis: ReadonlySet<string>;
 }) {
-  const [open, setOpen] = useState(true);
   const [typesOpen, setTypesOpen] = useState(false);
 
   // Counts follow the filter semantics: ship types only count civilian categories,
@@ -110,111 +78,96 @@ export default function VesselFilterPanel({
 
   return (
     <>
+      <div className="filter-presets" role="group" aria-label="Quick views">
+        {VESSEL_FILTER_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={`filter-preset ${sameFilters(filters, p.filters) ? 'on' : ''}`}
+            aria-pressed={sameFilters(filters, p.filters)}
+            onClick={() => onChange({ ...p.filters })}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {active && !VESSEL_FILTER_PRESETS.some((p) => sameFilters(filters, p.filters)) && (
+        <button type="button" className="panel-link" onClick={() => onChange({ ...DEFAULT_VESSEL_FILTERS })}>
+          Reset to all ships
+        </button>
+      )}
+
+      <div className="panel-kicker">Category · marker colour</div>
+      {CATEGORY_KEYS.map((key) => (
+        <LayerRow
+          key={key}
+          label={CATEGORY_LABELS[key]}
+          marker={<TriangleMarker color={HEADER_COLORS[key]} />}
+          count={counts.category[key]}
+          checked={filters[key]}
+          onChange={(on) => set(key, on)}
+        />
+      ))}
+
       <button
         type="button"
-        className={`disclaimer-toggle ${open ? 'open' : ''}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
+        className={`disclaimer-toggle filter-subtoggle ${typesOpen ? 'open' : ''}`}
+        onClick={() => setTypesOpen((v) => !v)}
+        aria-expanded={typesOpen}
       >
-        Ship filters{active ? ' · on' : ''}
+        Ship type · {typeSummary}
       </button>
-      {open && (
-        <div className="group">
-          <div className="filter-presets" role="group" aria-label="Quick filters">
-            {VESSEL_FILTER_PRESETS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`filter-preset ${sameFilters(filters, p.filters) ? 'on' : ''}`}
-                aria-pressed={sameFilters(filters, p.filters)}
-                onClick={() => onChange({ ...p.filters })}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {active && !VESSEL_FILTER_PRESETS.some((p) => sameFilters(filters, p.filters)) && (
-            <button
-              type="button"
-              className="text-btn"
-              style={{ margin: '0 0 6px' }}
-              onClick={() => onChange({ ...DEFAULT_VESSEL_FILTERS })}
-            >
-              Reset to all ships
-            </button>
-          )}
-
-          <div className="item hint filter-group-hint">Category · marker colour</div>
-          {CATEGORY_KEYS.map((key) => (
-            <FilterRow
+      {typesOpen && (
+        <>
+          <p className="panel-note">Civilian vessels only — military and research follow their category.</p>
+          {SHIP_CLASS_KEYS.map((key) => (
+            <LayerRow
               key={key}
-              label={CATEGORY_LABELS[key]}
-              swatch={HEADER_COLORS[key]}
-              count={counts.category[key]}
+              label={SHIP_CLASS_LABELS[key]}
+              count={counts.shipClass[key]}
               checked={filters[key]}
               onChange={(on) => set(key, on)}
             />
           ))}
-
-          <button
-            type="button"
-            className={`disclaimer-toggle filter-subtoggle ${typesOpen ? 'open' : ''}`}
-            onClick={() => setTypesOpen((v) => !v)}
-            aria-expanded={typesOpen}
-          >
-            Ship type · {typeSummary}
-          </button>
-          {typesOpen && (
-            <>
-              <div className="item hint filter-group-hint">
-                Civilian vessels only — military and research follow their category
-              </div>
-              {SHIP_CLASS_KEYS.map((key) => (
-                <FilterRow
-                  key={key}
-                  label={SHIP_CLASS_LABELS[key]}
-                  count={counts.shipClass[key]}
-                  checked={filters[key]}
-                  onChange={(on) => set(key, on)}
-                />
-              ))}
-            </>
-          )}
-
-          <div className="item hint filter-group-hint">
-            Show only · {anyFocusActive(filters) ? 'vessels matching any checked' : 'off'}
-          </div>
-          <FilterRow
-            label="Russian flag"
-            count={counts.russian}
-            checked={filters.russianFlag}
-            onChange={(on) => set('russianFlag', on)}
-          />
-          <FilterRow
-            label="Sanctioned"
-            count={counts.sanctioned}
-            checked={filters.sanctioned}
-            onChange={(on) => set('sanctioned', on)}
-          />
-          <FilterRow
-            label="Shadow fleet"
-            count={counts.shadow}
-            checked={filters.shadow}
-            onChange={(on) => set('shadow', on)}
-          />
-          <FilterRow
-            label="Watchlist"
-            count={counts.watchlist}
-            checked={filters.watchlistOnly}
-            onChange={(on) => set('watchlistOnly', on)}
-          />
-          <FilterRow
-            label="Updated last 6 hours"
-            checked={filters.recent6h}
-            onChange={(on) => set('recent6h', on)}
-          />
-        </div>
+        </>
       )}
+
+      <div className="panel-kicker">
+        Show only · {anyFocusActive(filters) ? 'any of the checked' : 'off'}
+      </div>
+      <LayerRow
+        label="Russian flag"
+        marker={<TriangleMarker color={HEADER_COLORS.russia} />}
+        count={counts.russian}
+        checked={filters.russianFlag}
+        onChange={(on) => set('russianFlag', on)}
+      />
+      <LayerRow
+        label="Sanctioned"
+        marker={<RingMarker color="#F0704A" />}
+        count={counts.sanctioned}
+        checked={filters.sanctioned}
+        onChange={(on) => set('sanctioned', on)}
+      />
+      <LayerRow
+        label="Shadow fleet"
+        marker={<RingMarker color="#B9A0E6" dashed />}
+        count={counts.shadow}
+        checked={filters.shadow}
+        onChange={(on) => set('shadow', on)}
+      />
+      <LayerRow
+        label="Watchlist"
+        marker={<RingMarker color="#E7A54A" />}
+        count={counts.watchlist}
+        checked={filters.watchlistOnly}
+        onChange={(on) => set('watchlistOnly', on)}
+      />
+      <LayerRow
+        label="Updated last 6 hours"
+        checked={filters.recent6h}
+        onChange={(on) => set('recent6h', on)}
+      />
     </>
   );
 }
