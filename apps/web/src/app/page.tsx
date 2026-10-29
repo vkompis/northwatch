@@ -827,7 +827,7 @@ export default function HomePage() {
             <h2 className="panel-h">Sea &amp; seabed</h2>
             <LayerRow
               label="Seabed relief"
-              sub="AWS Terrain Tiles"
+              sub="Kartverket 50–5 m · AWS terrain elsewhere"
               checked={overlays['seabed-relief']}
               onChange={(on) => setOverlay('seabed-relief', on)}
             />
