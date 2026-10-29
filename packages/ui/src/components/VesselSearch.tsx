@@ -12,6 +12,7 @@ export type VesselSearchHit = {
   lat: number;
   sanctioned?: boolean;
   shadowfleet?: boolean;
+  sanctionedMaster?: boolean;
   military?: boolean;
   research?: boolean;
   shipType?: string | null;
@@ -177,6 +178,7 @@ export default function VesselSearch({ apiBase, onSelect, onOpenMmsi, className 
                   {h.imo ? ` · IMO ${h.imo}` : ''}
                   {h.sanctioned ? ' · sanctioned' : ''}
                   {h.shadowfleet ? ' · shadow' : ''}
+                  {h.sanctionedMaster ? ' · sanctioned master' : ''}
                   {h.timestamp ? ` · ${ageLabel(h.timestamp)}` : ''}
                 </span>
               </button>

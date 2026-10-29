@@ -40,6 +40,18 @@ export function WarningMarker({ edge }: { edge: string }) {
 export const SANCTION_EDGE = '#dc0a14';
 export const SHADOW_EDGE = '#000a14';
 
+/** Badge the map puts over ships whose master is sanctioned (public/markers/Circles/masterbadge.svg). */
+export function MasterMarker() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 64 64" aria-hidden="true">
+      <circle cx="32" cy="32" r="27" fill="#fff" stroke="#e8590c" strokeWidth="7" />
+      <path d="M13 30c0-7 9-12 19-12s19 5 19 12l-5 4H18z" fill="#0a1118" />
+      <rect x="18" y="35.5" width="28" height="5" rx="1" fill="#0a1118" />
+      <path d="M19 42h26c-3 5-8 6.5-13 6.5S22 47 19 42z" fill="#0a1118" />
+    </svg>
+  );
+}
+
 /** Star the map puts beside ships on the watchlist (public/markers/Circles/watchstar.svg). */
 export function StarMarker() {
   return (

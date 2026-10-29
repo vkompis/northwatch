@@ -17,6 +17,7 @@ import {
   readEuDesignatedCsv,
   readOpenSanctionsVesselIds,
   OPENSANCTIONS_VESSELS_CSV,
+  DMA_PAGE_URL,
 } from './sanctionsUpdater';
 import {
   startAisStreamClient,
@@ -42,6 +43,8 @@ import {
   MOVEABLE_FILE,
 } from './fetchSodirFacilities';
 import { fetchSodirPipelinesToFile } from './fetchSodirPipelines';
+import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
+import { gurImoSets, sanctionListings } from './sanctionListings';
 import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
@@ -97,6 +100,10 @@ let SANCTIONED_CACHE_TS = 0;
 // In-memory shadow fleet MMSI cache
 let SHADOWFLEET_MMSI: Set<string> = new Set();
 let SHADOWFLEET_IMO: Set<string> = new Set();
+/** Ships on any GUR list (shown on the map wherever they are) */
+let GUR_LISTED_IMO: Set<string> = new Set();
+/** Ships whose master is on GUR's list of sanctioned captains */
+let SANCTIONED_MASTER_IMO: Set<string> = new Set();
 let SHADOW_CACHE_TS = 0;
 const SHADOW_TEST_SET: Set<string> = new Set(
   (process.env.SHADOW_TEST_MMSI || '')
@@ -215,6 +222,11 @@ async function ensureShadowLoaded(): Promise<void> {
       os.imos.forEach((m) => SHADOWFLEET_IMO.add(m));
       os.mmsis.forEach((m) => SHADOWFLEET_MMSI.add(m));
     }
+    // GUR lists read directly (daily): shadow fleet, marine vessels, sanctioned masters
+    const gur = gurImoSets();
+    gur.shadow.forEach((m) => SHADOWFLEET_IMO.add(m));
+    GUR_LISTED_IMO = gur.listed;
+    SANCTIONED_MASTER_IMO = gur.master;
     SHADOW_CACHE_TS = now;
     console.log(`[shadowfleet] mmsi=${SHADOWFLEET_MMSI.size} imo=${SHADOWFLEET_IMO.size}`);
   } catch (e) {
@@ -1409,8 +1421,9 @@ function shouldIncludeVessel(opts: {
     SHADOW_TEST_SET.has(mmsi) ||
     (!!imo && SHADOWFLEET_IMO.has(imo));
   const isMilitary = isMilitaryShipType(shipType) || MILITARY_MMSI.has(mmsi);
+  const isGurListed = !!imo && GUR_LISTED_IMO.has(imo);
   return {
-    include: isRussian || isResearch || isSanctioned || isShadow || isMilitary,
+    include: isRussian || isResearch || isSanctioned || isShadow || isMilitary || isGurListed,
     inSvalbard: false,
   };
 }
@@ -1486,6 +1499,11 @@ function normalizeLiveVessel(input: {
     shipType,
     sanctioned: SANCTIONED_MMSI.has(mmsiStr) || isEuSanctioned,
     shadowfleet: isShadow,
+    // Only flagged when the ship is not sanctioned in its own right
+    sanctionedMaster:
+      !!imoStr &&
+      SANCTIONED_MASTER_IMO.has(imoStr) &&
+      !(SANCTIONED_MMSI.has(mmsiStr) || isEuSanctioned),
     military: isMilitaryShipType(shipTypeRaw ?? shipType) || MILITARY_MMSI.has(mmsiStr),
     research: isRussianResearchVessel(mmsiStr, imoStr || null),
     eta: formatEta(input.eta),
@@ -1756,6 +1774,7 @@ app.get('/api/vessels/search', async (req, res) => {
       eta: v.eta,
       sanctioned: !!v.sanctioned,
       shadowfleet: !!v.shadowfleet,
+      sanctionedMaster: !!v.sanctionedMaster,
       military: !!v.military,
       research: !!v.research,
       shipType: v.shipType,
@@ -1776,49 +1795,43 @@ app.get('/api/sanctions/lookup', async (req, res) => {
       .padStart(9, '0')
       .slice(-9);
     const imo = String(req.query.imo || '').replace(/\D/g, '');
-    let meta: any = {};
-    try {
-      meta = JSON.parse(fs.readFileSync(EU_DESIGNATED_META, 'utf8'));
-    } catch {
-      /* empty */
-    }
     const sanctionedMmsi = mmsi.length === 9 && SANCTIONED_MMSI.has(mmsi);
     const sanctionedImo = imo.length >= 7 && SANCTIONED_IMO.has(imo);
     const shadowMmsi = mmsi.length === 9 && (SHADOWFLEET_MMSI.has(mmsi) || SHADOW_TEST_SET.has(mmsi));
     const shadowImo = imo.length >= 7 && SHADOWFLEET_IMO.has(imo);
-    const mappedMmsi = imo && IMO_TO_MMSI_MAP.get(imo);
+    const sanctioned = sanctionedMmsi || sanctionedImo;
+    const listings = sanctionListings(imo.length === 7 ? imo : null, mmsi.length === 9 ? mmsi : null);
+    // Older local lists (Sanctionlist.CSV, hand-added MMSIs) carry no programme details
+    if (sanctioned && !listings.some((l) => l.kind === 'sanction')) {
+      listings.unshift({
+        kind: 'sanction',
+        source: 'Local',
+        title: 'Older local sanctions list',
+        programmes: [],
+        detail: 'Sanctionlist.CSV or a hand-added MMSI — no programme recorded',
+        listedName: null,
+        listedImo: sanctionedImo ? imo : null,
+        listedMmsi: sanctionedMmsi ? mmsi : null,
+        since: null,
+        url: null,
+        urlLabel: null,
+        matchedBy: [sanctionedImo ? 'imo' : 'mmsi'],
+      });
+    }
+    // A listed entry links to itself; otherwise search by IMO (OpenSanctions indexes "IMO1234567")
+    const osEntry = listings.find((l) => l.source === 'OpenSanctions' && l.url);
     res.json({
       mmsi: mmsi || null,
       imo: imo || null,
-      sanctioned: sanctionedMmsi || sanctionedImo,
+      sanctioned,
       shadowfleet: shadowMmsi || shadowImo,
-      matches: {
-        sanctionedMmsi,
-        sanctionedImo,
-        shadowMmsi,
-        shadowImo,
-        imoMappedMmsi: mappedMmsi || null,
-      },
-      sources: [
-        sanctionedImo || sanctionedMmsi
-          ? 'Local EU designated / OpenSanctions vessel lists (CSV cache)'
-          : null,
-        shadowMmsi || shadowImo ? 'GUR shadow-fleet list (local CSV + OpenSanctions)' : null,
-      ].filter(Boolean),
-      listMeta: {
-        euImoCount: readEuDesignatedCsv().size,
-        sanctionedMmsiCache: SANCTIONED_MMSI.size,
-        sanctionedImoCache: SANCTIONED_IMO.size,
-        shadowMmsiCache: SHADOWFLEET_MMSI.size,
-        meta,
-      },
-      opensanctionsUrl: imo
-        ? `https://www.opensanctions.org/search/?q=${encodeURIComponent(imo)}`
-        : mmsi
-          ? `https://www.opensanctions.org/search/?q=${encodeURIComponent(mmsi)}`
-          : 'https://www.opensanctions.org/',
-      disclaimer:
-        'Boolean match against free local lists only — not a legal determination. Cross-check primary listings before publication.',
+      sanctionedMaster: listings.some((l) => l.kind === 'master') && !sanctioned,
+      listings,
+      opensanctionsUrl:
+        osEntry?.url ||
+        `https://www.opensanctions.org/search/?q=${encodeURIComponent(imo.length === 7 ? `IMO${imo}` : mmsi)}`,
+      euListUrl: DMA_PAGE_URL,
+      gurListUrl: 'https://war-sanctions.gur.gov.ua/en/transport/ships',
     });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || String(e) });
@@ -2911,11 +2924,18 @@ app.get('/api/sanctions/status', (_req, res) => {
   } catch {
     /* empty */
   }
+  let gur: any = {};
+  try {
+    gur = JSON.parse(fs.readFileSync(GUR_VESSELS_META, 'utf8'));
+  } catch {
+    /* empty */
+  }
   res.json({
     euImoCount: readEuDesignatedCsv().size,
     sanctionedMmsiCache: SANCTIONED_MMSI.size,
     sanctionedImoCache: SANCTIONED_IMO.size,
     meta,
+    gur,
   });
 });
 
@@ -3765,6 +3785,24 @@ app.listen(PORT, () => {
     maybeRefreshSanctions('weekly-cron').catch((e) => console.warn('[sanctions] cron failed', e));
   });
   maybeRefreshSanctions('startup').catch((e) => console.warn('[sanctions] startup refresh failed', e));
+
+  // GUR War & Sanctions lists (marine vessels, shadow fleet, captains): daily, ~5 min of
+  // slow page reads; on startup only when the last read is over a day old
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  async function refreshGur(reason: string) {
+    const age = gurMetaAgeMs();
+    if (reason === 'startup' && age != null && age < DAY_MS) return;
+    console.log(`[gur] refresh (${reason})…`);
+    const result = await updateGurVessels();
+    if (result.ok) {
+      SHADOW_CACHE_TS = 0;
+      await ensureShadowLoaded();
+    }
+  }
+  cron.schedule('20 5 * * *', () => {
+    refreshGur('daily-cron').catch((e) => console.warn('[gur] cron failed', e));
+  });
+  refreshGur('startup').catch((e) => console.warn('[gur] startup refresh failed', e));
 
   // File-backed area alerts — runs without an open browser (email if SMTP configured)
   startAlertWatcher(async () => {

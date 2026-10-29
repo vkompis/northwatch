@@ -16,7 +16,14 @@ import {
   vesselCategoryKey,
   vesselShipClass,
 } from '@svalmap/ui';
-import LayerRow, { SANCTION_EDGE, SHADOW_EDGE, StarMarker, TriangleMarker, WarningMarker } from './LayerRow';
+import LayerRow, {
+  MasterMarker,
+  SANCTION_EDGE,
+  SHADOW_EDGE,
+  StarMarker,
+  TriangleMarker,
+  WarningMarker,
+} from './LayerRow';
 
 const CATEGORY_LABELS: Record<VesselCategory, string> = {
   norway: 'Norwegian',
@@ -55,6 +62,7 @@ export default function VesselFilterPanel({
     let russian = 0;
     let sanctioned = 0;
     let shadow = 0;
+    let master = 0;
     let watchlist = 0;
     for (const v of vessels) {
       const cat = vesselCategoryKey(v);
@@ -65,9 +73,10 @@ export default function VesselFilterPanel({
       if ((v.flagCountry || mmsiFlagCountry(v.mmsi)) === 'russia') russian += 1;
       if (v.sanctioned) sanctioned += 1;
       if (v.shadowfleet) shadow += 1;
+      if (v.sanctionedMaster) master += 1;
       if (watchlistMmsis.has(v.mmsi)) watchlist += 1;
     }
-    return { category, shipClass, russian, sanctioned, shadow, watchlist };
+    return { category, shipClass, russian, sanctioned, shadow, master, watchlist };
   }, [vessels, watchlistMmsis, filters]);
 
   const set = (key: keyof VesselFilterFlags, on: boolean) => onChange({ ...filters, [key]: on });
@@ -155,6 +164,14 @@ export default function VesselFilterPanel({
         count={counts.shadow}
         checked={filters.shadow}
         onChange={(on) => set('shadow', on)}
+      />
+      <LayerRow
+        label="Sanctioned master"
+        sub="Captain on Ukraine GUR's list"
+        marker={<MasterMarker />}
+        count={counts.master}
+        checked={filters.sanctionedMaster}
+        onChange={(on) => set('sanctionedMaster', on)}
       />
       <LayerRow
         label="Watchlist"

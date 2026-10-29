@@ -46,6 +46,8 @@ export type VesselFeatureProps = {
   source: string | null;
   sanctioned: number;
   shadowfleet: number;
+  /** Master on GUR's sanctioned-captains list; only set when the ship itself is not sanctioned */
+  sanctionedMaster: number;
   military: number;
   research: number;
   country: string;
@@ -123,6 +125,7 @@ const MARKER_IMAGES: { name: string; url: string }[] = [
   { name: 'Sanksjon', url: '/markers/Circles/Sanksjon.svg' },
   { name: 'ShadowTriangle', url: '/markers/Circles/shadowtriangle.svg' },
   { name: 'WatchStar', url: '/markers/Circles/watchstar.svg' },
+  { name: 'MasterBadge', url: '/markers/Circles/masterbadge.svg' },
   { name: 'Norwaytriangle', url: '/markers/Countries/Norwaytriangle.svg' },
   { name: 'Russiatriangle', url: '/markers/Countries/Russiatriangle.svg' },
   { name: 'EUtriangle', url: '/markers/Countries/EUtriangle.svg' },
@@ -248,12 +251,13 @@ function toFeature(v: any) {
   const name = v.vessel_name || v.name || '';
   const sanctioned = v.sanctioned === true || v.sanctioned === 1;
   const shadowfleet = v.shadowfleet === true || v.shadowfleet === 1;
+  const sanctionedMaster = !sanctioned && (v.sanctionedMaster === true || v.sanctionedMaster === 1);
   const category = mmsiCategory(mmsi, shipType, imo, v.military);
   const flagCountry = mmsiFlagCountry(mmsi);
   const country = countryInfoFromMmsi(mmsi);
   // Never bucket vessels of interest as buoys, even with odd MMSIs
   const ofInterest =
-    sanctioned || shadowfleet || category === 'military' || category === 'research';
+    sanctioned || shadowfleet || sanctionedMaster || category === 'military' || category === 'research';
   const shipClass =
     !ofInterest && isLikelyAisDevice({ mmsi, imo, name })
       ? 'device'
@@ -283,6 +287,7 @@ function toFeature(v: any) {
     source: v.source != null && v.source !== '' ? String(v.source) : null,
     sanctioned: sanctioned ? 1 : 0,
     shadowfleet: shadowfleet ? 1 : 0,
+    sanctionedMaster: sanctionedMaster ? 1 : 0,
     military: category === 'military' ? 1 : 0,
     research: category === 'research' ? 1 : 0,
     country: country.name,
@@ -413,6 +418,7 @@ export default function VesselLayer({
       'vessels-label',
       'sanction-indicator',
       'shadow-indicator',
+      'master-indicator',
       'watch-indicator',
     ];
     const trackSourceId = 'vessel-track';
@@ -483,6 +489,7 @@ export default function VesselLayer({
         lat,
         sanctioned: Number(p.sanctioned) ? 1 : 0,
         shadowfleet: Number(p.shadowfleet) ? 1 : 0,
+        sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
       });
 
       if (!hoverPopup) {
@@ -1152,6 +1159,10 @@ export default function VesselLayer({
         map.setLayoutProperty('shadow-indicator', 'icon-size', badgeSize);
         map.setPaintProperty('shadow-indicator', 'icon-translate', badgeTranslate);
       }
+      if (map.getLayer('master-indicator')) {
+        map.setLayoutProperty('master-indicator', 'icon-size', badgeSize);
+        map.setPaintProperty('master-indicator', 'icon-translate', badgeTranslate);
+      }
     }
 
     async function ensureLayers() {
@@ -1299,6 +1310,32 @@ export default function VesselLayer({
         });
       }
 
+      // Same spot as the sanction / shadow badges, so only when neither of those is drawn
+      if (!map.getLayer('master-indicator')) {
+        map.addLayer({
+          id: 'master-indicator',
+          type: 'symbol',
+          source: sourceId,
+          layout: {
+            'icon-image': 'MasterBadge',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'icon-size': badgeSize,
+            'icon-anchor': 'center',
+          },
+          paint: {
+            'icon-opacity': [
+              'case',
+              ['all', ['==', ['get', 'sanctionedMaster'], 1], ['!=', ['get', 'shadowfleet'], 1]],
+              1,
+              0,
+            ],
+            'icon-translate': badgeTranslate,
+            'icon-translate-anchor': 'viewport',
+          },
+        });
+      }
+
       if (!map.getLayer('watch-indicator')) {
         map.addLayer({
           id: 'watch-indicator',
@@ -1327,11 +1364,12 @@ export default function VesselLayer({
       // Keep styles in sync after HMR / remount without tearing down layers
       applyMarkerStyles();
 
-      // Drop leftover MapLibre layer filters from older setFilter-based builds
+      // Drop leftover MapLibre layer filters from older setFilter-based builds.
+      // The watchlist star is the one vessel layer that is meant to be filtered.
       for (const id of layerIds) {
         if (!map.getLayer(id)) continue;
         try {
-          map.setFilter(id, null as any);
+          map.setFilter(id, id === 'watch-indicator' ? watchFilter() : (null as any));
         } catch {
           /* ignore */
         }
@@ -1393,6 +1431,7 @@ export default function VesselLayer({
             source: strOrNull(p.source),
             sanctioned: Number(p.sanctioned) ? 1 : 0,
             shadowfleet: Number(p.shadowfleet) ? 1 : 0,
+            sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
             military: Number(p.military) ? 1 : 0,
             research: Number(p.research) ? 1 : 0,
             country: strOrEmpty(p.country) || 'Unknown',
@@ -1591,6 +1630,7 @@ export default function VesselLayer({
         'vessels-label',
         'sanction-indicator',
         'shadow-indicator',
+        'master-indicator',
         'watch-indicator',
       ]) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', v);

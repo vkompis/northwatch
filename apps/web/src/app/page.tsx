@@ -395,6 +395,7 @@ export default function HomePage() {
         russian?: boolean;
         sanctioned?: boolean;
         shadowfleet?: boolean;
+        sanctionedMaster?: boolean;
         military?: boolean;
         research?: boolean;
         lon?: number;
@@ -447,6 +448,7 @@ export default function HomePage() {
           source: null,
           sanctioned: opts?.sanctioned ? 1 : 0,
           shadowfleet: opts?.shadowfleet ? 1 : 0,
+          sanctionedMaster: opts?.sanctionedMaster ? 1 : 0,
           military: category === 'military' ? 1 : 0,
           research: category === 'research' ? 1 : 0,
           country: country.name,
@@ -522,7 +524,7 @@ export default function HomePage() {
             padding: {
               top: 56,
               right: detailDrawerOpen ? 380 : 0,
-              bottom: 136,
+              bottom: 146,
               left: drawerOpen ? 300 : 0,
             },
           }
@@ -613,6 +615,7 @@ export default function HomePage() {
               shipType: hit.shipType,
               sanctioned: hit.sanctioned,
               shadowfleet: hit.shadowfleet,
+              sanctionedMaster: hit.sanctionedMaster,
               military: hit.military,
               research: hit.research,
               lon: hit.lon,
@@ -1067,7 +1070,6 @@ export default function HomePage() {
               <VesselDossier
                 vessel={selectedVessel}
                 sanctions={sanctionsInfo}
-                apiBase={apiBase}
                 note={watchlist.notes[selectedVessel.mmsi] || ''}
                 onNoteChange={(text) =>
                   setWatchlist((s) => setVesselNote(s, selectedVessel.mmsi, text))

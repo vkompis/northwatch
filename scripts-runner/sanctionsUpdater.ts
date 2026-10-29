@@ -358,6 +358,24 @@ export function readOpenSanctionsVesselIds(
   return { imos, mmsis };
 }
 
+/** Full rows of the local OpenSanctions subset, to show which programme a match comes from. */
+export function readOpenSanctionsVessels(filePath = OPENSANCTIONS_VESSELS_CSV): OpenSanctionsVesselRow[] {
+  if (!fs.existsSync(filePath)) return [];
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean);
+  return lines.slice(1).map((line) => {
+    const c = parseCsvLine(line);
+    return {
+      imo: parseImo(c[0]) || '',
+      mmsi: String(c[1] || '').match(/\d{9}/)?.[0] || '',
+      name: (c[2] || '').trim(),
+      risk: (c[3] || '').trim(),
+      flag: (c[4] || '').trim(),
+      url: (c[5] || '').trim(),
+      datasets: (c[6] || '').trim(),
+    };
+  });
+}
+
 /**
  * Merge DMA list into local EU designated CSV (additive: never drops existing IMOs).
  * Cross-checks FleetLeaks changelog for IMOs mentioned there but missing locally.

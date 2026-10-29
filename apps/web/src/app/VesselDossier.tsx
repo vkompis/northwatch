@@ -1,8 +1,8 @@
 'use client';
 
 import type { VesselFeatureProps } from '@svalmap/ui';
-import { HEADER_COLORS, ShipPhoto, formatLatLonDm, navStatusLabel } from '@svalmap/ui';
-import { SANCTION_EDGE, SHADOW_EDGE, TriangleMarker, WarningMarker } from './LayerRow';
+import { HEADER_COLORS, formatLatLonDm, navStatusLabel } from '@svalmap/ui';
+import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, TriangleMarker, WarningMarker } from './LayerRow';
 
 const SOURCE_LABELS: Record<string, string> = {
   aisstream: 'AISStream',
@@ -28,11 +28,45 @@ function utc(iso: string | null): string | null {
 
 const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
+/** One entry on a sanctions / GUR list, as /api/sanctions/lookup returns it. */
+type Listing = {
+  kind: 'sanction' | 'shadow' | 'gur' | 'master';
+  source: string;
+  title: string;
+  programmes: string[];
+  detail: string | null;
+  listedName: string | null;
+  listedImo: string | null;
+  listedMmsi: string | null;
+  since: string | null;
+  url: string | null;
+  urlLabel: string | null;
+  matchedBy: ('imo' | 'mmsi')[];
+};
+
+const sameName = (a: string, b: string) =>
+  a.toUpperCase().replace(/[^A-Z0-9]/g, '') === b.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Matched on MMSI only, but listed under another IMO or name: the MMSI may have been reused. */
+function mmsiOnlyMismatch(l: Listing, v: VesselFeatureProps): boolean {
+  if (l.matchedBy.includes('imo')) return false;
+  if (l.listedImo && v.imo && l.listedImo !== v.imo) return true;
+  return !!(l.listedName && v.name && !sameName(l.listedName, v.name));
+}
+
+function ListingMarker({ kind }: { kind: Listing['kind'] }) {
+  if (kind === 'sanction') return <WarningMarker edge={SANCTION_EDGE} />;
+  if (kind === 'shadow') return <WarningMarker edge={SHADOW_EDGE} />;
+  if (kind === 'master') return <MasterMarker />;
+  return <TriangleMarker color="var(--sv-muted)" />;
+}
+
+const externalLink = { target: '_blank', rel: 'noopener noreferrer' } as const;
+
 /** Right-hand dossier for a selected vessel: identity, risk, live facts, reach, sources, note. */
 export default function VesselDossier({
   vessel: v,
   sanctions,
-  apiBase,
   note,
   onNoteChange,
   watched,
@@ -42,7 +76,6 @@ export default function VesselDossier({
 }: {
   vessel: VesselFeatureProps;
   sanctions: any | null;
-  apiBase: string;
   note: string;
   onNoteChange: (text: string) => void;
   watched: boolean;
@@ -52,6 +85,23 @@ export default function VesselDossier({
 }) {
   const sanctioned = !!v.sanctioned || sanctions?.sanctioned === true;
   const shadow = !!v.shadowfleet || sanctions?.shadowfleet === true;
+  const listings: Listing[] = Array.isArray(sanctions?.listings) ? sanctions.listings : [];
+  const sanctionListings = listings.filter((l) => l.kind === 'sanction');
+  const master = !sanctioned && (!!v.sanctionedMaster || listings.some((l) => l.kind === 'master'));
+  // Badge names the programme; a match that rests on a reused-looking MMSI says so
+  const sanctionBadge = sanctionListings.length
+    ? sanctionListings.every((l) => mmsiOnlyMismatch(l, v))
+      ? 'Sanctions match on MMSI only'
+      : `Sanctioned · ${sanctionListings[0].programmes[0] || sanctionListings[0].title}`
+    : 'Sanctioned · list match';
+  const imoOk = !!v.imo && /^\d{7}$/.test(v.imo);
+  const lookups: [string, string][] = [
+    ['VesselFinder', `https://www.vesselfinder.com/vessels/details/${imoOk ? v.imo : v.mmsi}`],
+    ['MarineTraffic', `https://www.marinetraffic.com/en/ais/details/ships/${imoOk ? `imo:${v.imo}` : `mmsi:${v.mmsi}`}`],
+    ['OpenSanctions', sanctions?.opensanctionsUrl || `https://www.opensanctions.org/search/?q=${imoOk ? `IMO${v.imo}` : v.mmsi}`],
+    ['EU designated vessels (DMA)', sanctions?.euListUrl || 'https://www.dma.dk/growth-and-framework-conditions/maritime-sanctions/general-information/eu-vessel-designations'],
+    ['GUR War & Sanctions', sanctions?.gurListUrl || 'https://war-sanctions.gur.gov.ua/en/transport/ships'],
+  ];
   const speed = num(v.speed);
   const course = num(v.course);
   const heading = num(v.heading);
@@ -70,8 +120,6 @@ export default function VesselDossier({
     ['Position', hasPos ? formatLatLonDm(v.lat as number, v.lon as number) : null],
     ['Last fix', lastFix ? `${ago(v.timestamp)} · ${lastFix}` : null],
   ];
-  // Same distances the map's projection rings use
-  const reach = speed != null && speed >= 0.5 ? [1, 3, 6].map((h) => ({ h, nm: Math.round(speed * h) })) : null;
 
   return (
     <div className="dossier">
@@ -93,12 +141,18 @@ export default function VesselDossier({
         </span>
       </div>
 
-      {(sanctioned || shadow || v.category === 'research' || v.category === 'military') && (
+      {(sanctioned || shadow || master || v.category === 'research' || v.category === 'military') && (
         <div className="dossier-badges">
           {sanctioned && (
             <span className="dossier-badge sanction">
               <WarningMarker edge={SANCTION_EDGE} />
-              Sanctioned · list match
+              {sanctionBadge}
+            </span>
+          )}
+          {master && (
+            <span className="dossier-badge master">
+              <MasterMarker />
+              Sanctioned master
             </span>
           )}
           {shadow && (
@@ -122,8 +176,6 @@ export default function VesselDossier({
         </div>
       )}
 
-      <ShipPhoto imo={v.imo} vesselName={v.name} proxyBase={apiBase} />
-
       <dl className="dossier-facts">
         {facts.map(([k, val]) => (
           <div key={k} className={k === 'Position' || k === 'Last fix' ? 'wide' : undefined}>
@@ -133,54 +185,64 @@ export default function VesselDossier({
         ))}
       </dl>
 
-      <h3 className="dossier-h">Where it could be</h3>
-      {reach ? (
-        <>
-          <div className="dossier-reach">
-            {reach.map((r) => (
-              <div key={r.h}>
-                <span>+{r.h} h</span>
-                <strong>{r.nm} nm</strong>
-              </div>
-            ))}
-          </div>
-          <p className="dossier-note">At current speed over ground. Rings on the map.</p>
-        </>
+      <h3 className="dossier-h">Lists</h3>
+      {!sanctions ? (
+        <p className="dossier-note">Checking the lists…</p>
+      ) : listings.length === 0 ? (
+        <p className="dossier-note">Not on the EU, OpenSanctions or Ukraine GUR lists.</p>
       ) : (
-        <p className="dossier-note">Stationary, or no speed reported.</p>
+        <ul className="dossier-listings">
+          {listings.map((l, i) => (
+            <li key={`${l.source}-${l.kind}-${i}`} className={`dossier-listing ${l.kind}`}>
+              <span className="listing-marker">
+                <ListingMarker kind={l.kind} />
+              </span>
+              <div>
+                <div className="listing-title">{l.title}</div>
+                {l.programmes.length > 0 && <div className="listing-programmes">{l.programmes.join(' · ')}</div>}
+                {l.detail && <div className="listing-detail">{l.kind === 'master' ? `Master: ${l.detail}` : l.detail}</div>}
+                <div className="listing-meta">
+                  {[
+                    l.listedName && `Listed as ${l.listedName}`,
+                    l.listedImo && `IMO ${l.listedImo}`,
+                    l.listedMmsi && `MMSI ${l.listedMmsi}`,
+                    l.since && `since ${l.since}`,
+                    `matched on ${l.matchedBy.map((m) => m.toUpperCase()).join(' + ')}`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+                {mmsiOnlyMismatch(l, v) && (
+                  <div className="listing-warn">
+                    Listed under another name or IMO — this MMSI may have been reused. Check the entry before relying on it.
+                  </div>
+                )}
+                {l.url && (
+                  <a className="dossier-link" href={l.url} {...externalLink}>
+                    {l.urlLabel || 'Open entry'} ↗
+                  </a>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
 
-      <h3 className="dossier-h">Sources</h3>
-      <ul className="dossier-sources">
-        <li>
-          <span>Position</span>
-          {SOURCE_LABELS[v.source || ''] || (v.source ? v.source : 'Not in the live feed')}
-        </li>
-        <li>
-          <span>Sanctions</span>
-          {sanctions ? (sanctions.sanctioned ? 'Match' : 'No match') : 'Checking…'}
-          {sanctions?.sanctioned && sanctions.sources?.[0] ? ` · ${sanctions.sources[0]}` : ''}
-        </li>
-        <li>
-          <span>Shadow fleet</span>
-          {sanctions ? (sanctions.shadowfleet ? 'Match · GUR list' : 'No match') : 'Checking…'}
-        </li>
-      </ul>
-      {sanctions?.disclaimer && <p className="dossier-note">{sanctions.disclaimer}</p>}
-      {sanctions?.opensanctionsUrl && (
-        <a className="dossier-link" href={sanctions.opensanctionsUrl} target="_blank" rel="noopener noreferrer">
-          Search OpenSanctions ↗
-        </a>
-      )}
+      <h3 className="dossier-h">Look up</h3>
+      <div className="dossier-lookups">
+        {lookups.map(([label, href]) => (
+          <a key={label} href={href} {...externalLink}>
+            {label} ↗
+          </a>
+        ))}
+      </div>
+      <p className="dossier-note">
+        Position via {SOURCE_LABELS[v.source || ''] || (v.source ? v.source : 'search (not in the live feed)')}
+      </p>
 
       <label className="dossier-notefield">
-        <span className="dossier-h">Analyst note</span>
-        <textarea
-          rows={3}
-          value={note}
-          onChange={(e) => onNoteChange(e.target.value)}
-          placeholder="What did you see, and where did it come from? (saved in this browser)"
-        />
+        <span className="dossier-h">Note</span>
+        <textarea rows={3} value={note} onChange={(e) => onNoteChange(e.target.value)} />
       </label>
 
       <div className="dossier-actions">
