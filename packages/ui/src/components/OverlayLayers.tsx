@@ -433,8 +433,9 @@ function beforeIdForBathymetry(map: {
   getStyle: () => { layers?: { id: string; type: string }[] } | undefined;
 }): string | undefined {
   const layers = map.getStyle()?.layers || [];
+  // The seabed relief sits right above the water fill: going under it would hide the layer
   const overlay = layers.find(
-    (l) => l.id.startsWith('overlay-') && !l.id.startsWith('overlay-bathymetry')
+    (l) => l.id.startsWith('overlay-') && !l.id.startsWith('overlay-bathymetry') && !l.id.startsWith('overlay-seabed')
   );
   if (overlay) return overlay.id;
   const symbol = layers.find((l) => l.type === 'symbol');
