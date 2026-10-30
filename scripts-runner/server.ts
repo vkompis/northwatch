@@ -67,6 +67,7 @@ import {
   trackReasons,
   type SpotReport,
 } from './aisSpoofing';
+import { makeZoneTest, type ZoneTest } from './zoneIndex';
 import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
@@ -1276,10 +1277,15 @@ function geomBbox(geom: any): [number, number, number, number] | null {
   }
 }
 
+const ZONE_TESTS = new WeakMap<object, ZoneTest | null>();
+
 function pointInGeom(lon: number, lat: number, geom: any): boolean {
   if (!geom) return false;
   const b = geomBbox(geom);
   if (b && (lon < b[0] || lat < b[1] || lon > b[2] || lat > b[3])) return false;
+  if (!ZONE_TESTS.has(geom)) ZONE_TESTS.set(geom, makeZoneTest(geom));
+  const zoneTest = ZONE_TESTS.get(geom);
+  if (zoneTest) return zoneTest(lon, lat);
   try {
     return turf.booleanPointInPolygon(turf.point([lon, lat]), {
       type: 'Feature',

@@ -1,6 +1,7 @@
 import maplibregl from 'maplibre-gl';
 import { flattenLand } from './terrarium';
 import { reliefColours, reliefGain, tileBbox3857, tintKartverketRelief, type MapTheme } from './kartverketRelief';
+import { cachedTile } from './tileCache';
 
 /**
  * Seabed-only DEM: AWS terrarium tiles with every land pixel flattened to 0 m, so a
@@ -75,7 +76,8 @@ async function loadKartverketReliefTile(path: string, signal: AbortSignal): Prom
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   tintKartverketRelief(image.data, reliefColours(theme), reliefGain(z));
   ctx.putImageData(image, 0, 0);
-  return (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer();
+  // WebP: a tenth of the PNG's size, and these are shaded relief where it does not show
+  return (await canvas.convertToBlob({ type: 'image/webp', quality: 0.9 })).arrayBuffer();
 }
 
 export function registerKartverketReliefProtocol(): void {
@@ -83,7 +85,33 @@ export function registerKartverketReliefProtocol(): void {
   kvRegistered = true;
   maplibregl.addProtocol(KV_PROTOCOL, (params, callback) => {
     const controller = new AbortController();
-    loadKartverketReliefTile(params.url.slice(`${KV_PROTOCOL}://`.length), controller.signal)
+    const path = params.url.slice(`${KV_PROTOCOL}://`.length);
+    cachedTile(`${KV_PROTOCOL}/${path}`, () => loadKartverketReliefTile(path, controller.signal))
+      .then((data) => callback(null, data, null, null))
+      .catch((e) => {
+        if (!controller.signal.aborted) callback(e instanceof Error ? e : new Error(String(e)));
+      });
+    return { cancel: () => controller.abort() };
+  });
+}
+
+/** A plain WMS tile, kept in the browser because the service sends "no-store". */
+const CACHED_PROTOCOL = 'nwcached';
+export const cachedTileUrl = (url: string) => `${CACHED_PROTOCOL}://${url}`;
+
+let cachedRegistered = false;
+
+export function registerCachedTileProtocol(): void {
+  if (cachedRegistered || typeof window === 'undefined') return;
+  cachedRegistered = true;
+  maplibregl.addProtocol(CACHED_PROTOCOL, (params, callback) => {
+    const controller = new AbortController();
+    const url = params.url.slice(`${CACHED_PROTOCOL}://`.length);
+    cachedTile(url, async () => {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Tile HTTP ${res.status}`);
+      return res.arrayBuffer();
+    })
       .then((data) => callback(null, data, null, null))
       .catch((e) => {
         if (!controller.signal.aborted) callback(e instanceof Error ? e : new Error(String(e)));

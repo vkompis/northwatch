@@ -1674,6 +1674,8 @@ export default function VesselLayer({
     }
 
     const start = () => {
+      // Called from mount, load and idle; once ships have arrived the timer takes over
+      if (lastRefreshAt) return;
       refresh();
       if (!interval) {
         // Quick follow-up so BarentsWatch merge lands soon after AISStream-first paint

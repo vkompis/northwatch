@@ -7,6 +7,8 @@ import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 import {
   SEABED_DEM_TILES,
   kartverketReliefTiles,
+  cachedTileUrl,
+  registerCachedTileProtocol,
   registerKartverketReliefProtocol,
   registerSeabedProtocol,
 } from '../utils/seabedDem';
@@ -452,6 +454,38 @@ function beforeIdForSeabedRelief(map: {
   return beforeIdForBathymetry(map);
 }
 
+const EMPTY_GEOJSON = { type: 'FeatureCollection' as const, features: [] };
+
+/** Files already asked for, per map, so each is fetched once. */
+const REQUESTED_OVERLAYS = new WeakMap<object, Set<string>>();
+
+/** Fetch an overlay's files the first time it is on. The big ones are often never needed. */
+function loadOverlayData(map: any, apiBase: string, def: OverlayDef, visibility: OverlayVisibility) {
+  if (!visibility[def.id]) return;
+  let requested = REQUESTED_OVERLAYS.get(map);
+  if (!requested) REQUESTED_OVERLAYS.set(map, (requested = new Set()));
+  const seen = requested;
+  const files: [string, string][] = [[`overlay-${def.id}`, def.file]];
+  if (def.boundaryFile) files.push([`overlay-${def.id}-boundary`, def.boundaryFile]);
+  for (const [sourceId, file] of files) {
+    if (seen.has(sourceId) || !mapStyleReady(map) || !map.getSource(sourceId)) continue;
+    seen.add(sourceId);
+    fetch(`${apiBase}/overlays/${file}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load ${file}: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (mapStyleReady(map)) map.getSource(sourceId)?.setData(data);
+      })
+      .catch((e) => {
+        // Switching the layer off and on tries again
+        seen.delete(sourceId);
+        console.error(e);
+      });
+  }
+}
+
 function vis(visible: boolean): 'visible' | 'none' {
   return visible ? 'visible' : 'none';
 }
@@ -630,18 +664,12 @@ export default function OverlayLayers({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadOne(def: OverlayDef) {
+    // The layers go on the map empty, to keep their order; the data comes when one is switched on
+    function addOverlayLayers(def: OverlayDef) {
       if (!mapStyleReady(map)) return;
       const sourceId = `overlay-${def.id}`;
       if (!map.getSource(sourceId)) {
-        const url = `${apiBase}/overlays/${def.file}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`Failed to load ${def.file}: ${res.status}`);
-        const data = await res.json();
-        // boot() runs on both load and idle — another call may have added it meanwhile
-        if (cancelled || map.getSource(sourceId)) return;
-
-        map.addSource(sourceId, { type: 'geojson', data });
+        map.addSource(sourceId, { type: 'geojson', data: EMPTY_GEOJSON });
 
         if (def.fill) {
           map.addLayer({
@@ -733,12 +761,7 @@ export default function OverlayLayers({
       if (def.boundaryFile) {
         const bId = `overlay-${def.id}-boundary`;
         if (map.getSource(bId)) return;
-        const res = await fetch(`${apiBase}/overlays/${def.boundaryFile}`);
-        if (!res.ok) throw new Error(`Failed to load ${def.boundaryFile}: ${res.status}`);
-        const data = await res.json();
-        // boot() runs on both load and idle — another call may have added it meanwhile
-        if (cancelled || map.getSource(bId)) return;
-        map.addSource(bId, { type: 'geojson', data });
+        map.addSource(bId, { type: 'geojson', data: EMPTY_GEOJSON });
         map.addLayer({
           id: `${bId}-line`,
           type: 'line',
@@ -1116,11 +1139,19 @@ export default function OverlayLayers({
       });
     }
 
+    let booting = false;
+    let booted = false;
+
     async function boot() {
+      // Called from load, idle and a timer, but runs one at a time and only until it has worked
+      if (booted || booting || cancelled || !mapStyleReady(map)) return;
+      booting = true;
       // The map can be torn down while a step is loading; stop before touching it again
       try {
-        await Promise.all(OVERLAYS.map((d) => loadOne(d).catch((e) => console.error(e))));
-        if (cancelled) return;
+        for (const def of OVERLAYS) {
+          addOverlayLayers(def);
+          loadOverlayData(map, apiBase, def, visibilityRef.current);
+        }
         await loadBathymetry().catch((e) => console.error('[bathymetry]', e));
         if (cancelled) return;
         await loadPetroleumPoints();
@@ -1130,8 +1161,11 @@ export default function OverlayLayers({
         await loadTgLandings();
         if (cancelled) return;
         addMaritimeInfra();
+        booted = true;
       } catch (e) {
         console.error('[OverlayLayers]', e);
+      } finally {
+        booting = false;
       }
     }
 
@@ -1140,9 +1174,10 @@ export default function OverlayLayers({
       for (const { key, layers, minzoom, invertOnDark } of MARITIME_INFRA) {
         const sourceId = `overlay-${key}`;
         if (!mapStyleReady(map) || map.getSource(sourceId)) continue;
+        registerCachedTileProtocol();
         map.addSource(sourceId, {
           type: 'raster',
-          tiles: [maritimeInfraTiles(layers)],
+          tiles: [cachedTileUrl(maritimeInfraTiles(layers))],
           tileSize: 256,
           minzoom,
           maxzoom: 18,
@@ -1346,16 +1381,20 @@ export default function OverlayLayers({
       'overlay-pipelines-old-hit',
     ];
 
+    const pointerOn = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const pointerOff = () => {
+      map.getCanvas().style.cursor = '';
+    };
+    // Each layer once: the timer below used to add new hover listeners every two seconds
+    const boundLayers = new Set<string>();
     const bindLayerClick = (lid: string, handler: (e: any) => void) => {
-      if (!safeGetLayer(map, lid)) return;
-      map.off('click', lid, handler);
+      if (boundLayers.has(lid) || !safeGetLayer(map, lid)) return;
+      boundLayers.add(lid);
       map.on('click', lid, handler);
-      map.on('mouseenter', lid, () => {
-        map.getCanvas().style.cursor = 'pointer';
-      });
-      map.on('mouseleave', lid, () => {
-        map.getCanvas().style.cursor = '';
-      });
+      map.on('mouseenter', lid, pointerOn);
+      map.on('mouseleave', lid, pointerOff);
     };
 
     const bindClicks = () => {
@@ -1372,7 +1411,10 @@ export default function OverlayLayers({
       start();
       bindClicks();
     });
-    const bindTimer = setInterval(bindClicks, 2000);
+    const bindTimer = setInterval(() => {
+      void boot();
+      bindClicks();
+    }, 2000);
     const rigTimer = setInterval(() => {
       loadMoveableRigs().catch(() => undefined);
     }, 2 * 60_000);
@@ -1383,18 +1425,17 @@ export default function OverlayLayers({
       clearInterval(rigTimer);
       map.off('load', start);
       map.off('idle', start);
-      for (const lid of cableLayers) {
-        map.off('click', lid, cableClick);
-      }
-      for (const lid of portLayers) {
-        map.off('click', lid, portClick);
-      }
-      for (const lid of rigLayers) {
-        map.off('click', lid, rigClick);
-      }
-      for (const lid of pipelineLayers) {
-        map.off('click', lid, pipelineClick);
-      }
+      const unbind = (lids: string[], handler: (e: any) => void) => {
+        for (const lid of lids) {
+          map.off('click', lid, handler);
+          map.off('mouseenter', lid, pointerOn);
+          map.off('mouseleave', lid, pointerOff);
+        }
+      };
+      unbind(cableLayers, cableClick);
+      unbind(portLayers, portClick);
+      unbind(rigLayers, rigClick);
+      unbind(pipelineLayers, pipelineClick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, apiBase]);
@@ -1435,6 +1476,7 @@ export default function OverlayLayers({
   useEffect(() => {
     if (!mapStyleReady(map)) return;
     for (const def of OVERLAYS) {
+      loadOverlayData(map, apiBase, def, visibility);
       const sourceId = `overlay-${def.id}`;
       const v = vis(visibility[def.id]);
       for (const suffix of ['fill', 'line', 'circle', 'hit']) {
