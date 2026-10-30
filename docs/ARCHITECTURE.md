@@ -40,7 +40,7 @@ SvalMap is a maritime monitoring system focused on the Svalbard Fisheries Protec
 - Kystverket NAVAREA XIX
 
 ### Update cadence
-- **Map**: ~20s live-position poll
+- **Map**: live positions every 2 min (paused in hidden tabs)
 - **Sanctions**: weekly updater + startup refresh
 - **Ice edge**: daily cron (~06:30) + stale-on-startup
 - **GFW**: ~10 min in-memory cache

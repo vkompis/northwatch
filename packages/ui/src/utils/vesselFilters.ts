@@ -8,7 +8,7 @@
  *     military and research vessels are controlled by their category alone.
  *  3. Focus — optional. When any is on, the vessel must match at least one
  *     (Russian flag, sanctioned, shadow fleet, sanctioned master, possible AIS spoofing,
- *     watchlist).
+ *     Russian research ships, watchlist).
  * Plus a freshness toggle (updated within the last 6 hours).
  */
 
@@ -25,7 +25,15 @@ export const CATEGORY_KEYS = [
   'research',
 ] as const satisfies readonly VesselCategory[];
 
-export const FOCUS_KEYS = ['russianFlag', 'sanctioned', 'shadow', 'sanctionedMaster', 'spoofing', 'watchlistOnly'] as const;
+export const FOCUS_KEYS = [
+  'russianFlag',
+  'sanctioned',
+  'shadow',
+  'sanctionedMaster',
+  'spoofing',
+  'researchOnly',
+  'watchlistOnly',
+] as const;
 
 export type VesselFilterFlags = Record<VesselCategory, boolean> &
   Record<ShipClass, boolean> &
@@ -58,6 +66,7 @@ export const DEFAULT_VESSEL_FILTERS: VesselFilterFlags = {
   shadow: false,
   sanctionedMaster: false,
   spoofing: false,
+  researchOnly: false,
   watchlistOnly: false,
   recent6h: false,
 };
@@ -140,6 +149,7 @@ export function vesselPassesFilter(
   if (f.shadow && isOn(v.shadowfleet)) return true;
   if (f.sanctionedMaster && isOn(v.sanctionedMaster)) return true;
   if (f.spoofing && isOn(v.spoofing)) return true;
+  if (f.researchOnly && cat === 'research') return true;
   if (f.watchlistOnly && toSet(extras?.watchlistMmsis).has(String(v.mmsi || ''))) return true;
   return false;
 }
@@ -175,6 +185,7 @@ const URL_ALIASES: Record<string, keyof VesselFilterFlags> = {
   favorites: 'watchlistOnly',
   master: 'sanctionedMaster',
   spoof: 'spoofing',
+  'research-ships': 'researchOnly',
   devices: 'device',
   tug_work: 'tugWork',
   'tug-work': 'tugWork',
@@ -190,6 +201,7 @@ const URL_NAMES: Partial<Record<keyof VesselFilterFlags, string>> = {
   watchlistOnly: 'watchlist',
   sanctionedMaster: 'master',
   spoofing: 'spoof',
+  researchOnly: 'research-ships',
 };
 
 function urlKey(token: string): keyof VesselFilterFlags | null {

@@ -65,6 +65,7 @@ export default function VesselFilterPanel({
     let shadow = 0;
     let master = 0;
     let spoofing = 0;
+    let research = 0;
     let watchlist = 0;
     for (const v of vessels) {
       const cat = vesselCategoryKey(v);
@@ -77,9 +78,10 @@ export default function VesselFilterPanel({
       if (v.shadowfleet) shadow += 1;
       if (v.sanctionedMaster) master += 1;
       if (v.spoofing) spoofing += 1;
+      if (cat === 'research') research += 1;
       if (watchlistMmsis.has(v.mmsi)) watchlist += 1;
     }
-    return { category, shipClass, russian, sanctioned, shadow, master, spoofing, watchlist };
+    return { category, shipClass, russian, sanctioned, shadow, master, spoofing, research, watchlist };
   }, [vessels, watchlistMmsis, filters]);
 
   const set = (key: keyof VesselFilterFlags, on: boolean) => onChange({ ...filters, [key]: on });
@@ -148,6 +150,14 @@ export default function VesselFilterPanel({
         count={counts.spoofing}
         checked={filters.spoofing}
         onChange={(on) => set('spoofing', on)}
+      />
+      <LayerRow
+        label="Russian research ships"
+        sub="Followed anywhere in the world"
+        marker={<TriangleMarker color={HEADER_COLORS.research} />}
+        count={counts.research}
+        checked={filters.researchOnly}
+        onChange={(on) => set('researchOnly', on)}
       />
       <LayerRow
         label="Watchlist"

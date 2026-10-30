@@ -261,6 +261,16 @@ assert.equal('militaryAis' in mergeVesselFilters({ ...all, militaryAis: true }),
 const interest = { ...all, russianFlag: true, sanctioned: true, shadow: true };
 assert.equal(vesselPassesFilter({ category: 'russia', mmsi: '273000001' }, interest), true);
 assert.equal(vesselPassesFilter({ category: 'research', research: 1, mmsi: '273546520' }, interest), true);
+
+// Russian research ships on their own, wherever they are
+{
+  const only = { ...DEFAULT_VESSEL_FILTERS, researchOnly: true };
+  assert.equal(vesselPassesFilter({ category: 'research', research: 1, mmsi: '273546520' }, only), true);
+  assert.equal(vesselPassesFilter({ category: 'russia', flagCountry: 'russia', mmsi: '273111111' }, only), false);
+  assert.deepEqual(vesselFiltersToUrlTokens(only), ['research-ships']);
+  assert.equal(vesselFiltersFromUrlTokens(['research-ships']).researchOnly, true);
+  assert.equal(vesselFiltersFromUrlTokens(['-research']).research, false);
+}
 assert.equal(vesselPassesFilter({ category: 'eu', mmsi: '215000001', shadowfleet: 1 }, interest), true);
 assert.equal(vesselPassesFilter({ category: 'norway', mmsi: '257000001' }, interest), false);
 assert.deepEqual(vesselFiltersFromUrlTokens(vesselFiltersToUrlTokens(interest)), interest);

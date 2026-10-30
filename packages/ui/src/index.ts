@@ -33,7 +33,6 @@ export {
 export type { GfwVisibility, GfwEventProps } from './components/GfwLayers';
 export { default as IncidentLayer } from './components/IncidentLayer';
 export type { NavWarningProps } from './components/IncidentLayer';
-export { default as RestrictedAreaLayer } from './components/RestrictedAreaLayer';
 export { default as AoiDrawLayer } from './components/AoiDrawLayer';
 
 export {

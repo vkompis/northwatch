@@ -73,7 +73,6 @@ function copernicusAreaUrl(view: MapView | null): string {
 }
 import LayerRow, { DotMarker, LineMarker, RingMarker } from './LayerRow';
 import VesselDossier from './VesselDossier';
-import ResearchShips from './ResearchShips';
 import VesselTimeline from './VesselTimeline';
 
 const MapCanvas = dynamic(() => import('./MapCanvas'), { ssr: false });
@@ -697,10 +696,6 @@ export default function HomePage() {
                 openVesselByMmsi(mmsi, { name: entry?.name, imo: entry?.imo });
               }}
               onRemove={(mmsi) => setWatchlist((s) => removeWatchEntry(s, mmsi))}
-            />
-            <ResearchShips
-              vessels={liveVessels}
-              onOpen={(mmsi, name) => openVesselByMmsi(mmsi, { name, research: true })}
             />
 
             <button
