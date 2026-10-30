@@ -1,7 +1,7 @@
 'use client';
 
 import { HEADER_COLORS } from '@svalmap/ui';
-import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, StarMarker, TriangleMarker, WarningMarker } from './LayerRow';
+import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, StarMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
 /** The "How to use" panel: what each part of the map shows, and what it cannot tell you. */
 export default function HowToUse() {
@@ -17,7 +17,7 @@ export default function HowToUse() {
       <p>
         Inside the Norwegian and Jan Mayen zones and the Svalbard zone you see all registered
         ships. Further out you only see Russian, sanctioned, shadow-fleet, research and military
-        ships. Colour shows the flag; zoomed in, the triangle points where the ship is heading.
+        ships, and ships with signs of AIS spoofing. Colour shows the flag; zoomed in, the triangle points where the ship is heading.
       </p>
       <ul className="guide-keys">
         <li>
@@ -28,6 +28,9 @@ export default function HowToUse() {
         </li>
         <li>
           <MasterMarker /> The master is on GUR's sanctioned-captains list
+        </li>
+        <li>
+          <SpoofMarker /> Possible AIS spoofing
         </li>
         <li>
           <StarMarker /> On your watchlist
@@ -44,10 +47,18 @@ export default function HowToUse() {
       <h3>A ship's dossier</h3>
       <p>
         Click a ship (or search by name, MMSI or IMO). <b>Lists</b> tells you which list it is on,
-        under which name and IMO, and whether the match is on IMO or only on MMSI — an MMSI-only
-        match to a ship with another name is often a reused number. <b>Look up</b> opens the ship
+        under which name and IMO, and whether the match is on IMO or only on MMSI. An MMSI-only
+        match to a ship with another name is often a reused number. FleetLeaks, an independent
+        tracker, is shown as corroboration, or as a hint when it lists a ship our lists don't
+        (check the official list before relying on it). <b>Look up</b> opens the ship
         on VesselFinder, MarineTraffic, the sanctions lists and satellite images. Notes stay in
         this browser.
+      </p>
+      <p>
+        <b>Possible AIS spoofing</b> is only raised on what no real ship can report: a course over
+        360°, 40 knots or more for a cargo ship, tanker, fishing vessel or tug, or positions that
+        jump further than any ship can sail (back and forth, or to a new place it then keeps
+        reporting from). One stray position is not enough. The dossier lists what was seen and when.
       </p>
       <p>
         The <b>timeline</b> shows the last 24 hours: speed, position reports, gaps and Global
@@ -69,7 +80,8 @@ export default function HowToUse() {
 
       <h3>Sea, infrastructure and warnings</h3>
       <p>
-        <b>Sea &amp; seabed</b>: seabed relief (Kartverket's 50–5 m model near Norway), depth
+        <b>Sea &amp; seabed</b>: seabed relief (the Norwegian Mapping Authority's 50 to 5 m model
+        near Norway), depth
         contours, zones and the ice edge, plus satellite images of the area you are looking at.{' '}
         <b>Infrastructure</b>: telecom and power cables, pipelines, platforms and ports; the
         sea-chart layers appear as you zoom in. <b>Warnings</b>: navigational warnings in force,
@@ -78,8 +90,8 @@ export default function HowToUse() {
 
       <h3>Alerts and sharing</h3>
       <p>
-        <b>Alerts</b> (bottom left) watches an area you draw — click the corners and close it on
-        the first one — for chosen ships or any ship. <b>Share</b> copies a link with your ship
+        <b>Alerts</b> (bottom left) watches an area you draw (click the corners and close it on
+        the first one) for chosen ships or any ship. <b>Share</b> copies a link with your ship
         filters, the selected ship and its track range.
       </p>
 

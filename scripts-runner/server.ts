@@ -55,6 +55,8 @@ import {
 } from './darkVessels';
 import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
 import { gurImoSets, sanctionListings } from './sanctionListings';
+import { fleetleaksAgeMs, updateFleetleaks } from './fleetleaks';
+import { noteReport, noteTrackReasons, spoofingReasons, sweepSpoofing, trackReasons } from './aisSpoofing';
 import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
@@ -1671,9 +1673,37 @@ async function buildLivePositionsList(): Promise<{
   void ensureImoMapLoaded();
 
   const byMmsi = new Map<string, any>();
+  const now = Date.now();
+  // Every report from both feeds goes through the spoofing checks before the merge. Ships with
+  // evidence are shown wherever they are in the North Atlantic box, like ships on the lists.
+  const normalizeAndCheck = (input: any) => {
+    const mmsi = String(input.mmsi || '').replace(/\D/g, '').padStart(9, '0').slice(-9);
+    const typeRaw = input.shipType ?? input.shipTypeCode ?? null;
+    noteReport(
+      mmsi,
+      {
+        t: Date.parse(String(input.timestamp ?? '')),
+        lon: Number(input.lon),
+        lat: Number(input.lat),
+        course: input.course,
+        heading: input.heading,
+        speed: input.speed,
+        shipType:
+          typeRaw == null
+            ? populateFromStaticCache(mmsi, {}).shipType
+            : typeof typeRaw === 'string'
+              ? typeRaw
+              : getShipTypeDescriptionFromCode(typeRaw),
+      },
+      now
+    );
+    const shown = normalizeLiveVessel(input);
+    if (shown || !spoofingReasons(mmsi, now).length || !inNorthAtlanticBox(Number(input.lon), Number(input.lat))) return shown;
+    return normalizeLiveVessel(input, { ignoreDisplayRules: true });
+  };
 
   for (const v of getAisStreamVessels()) {
-    const normalized = normalizeLiveVessel(aisStreamInput(v));
+    const normalized = normalizeAndCheck(aisStreamInput(v));
     if (normalized) byMmsi.set(normalized.mmsi, normalized);
   }
 
@@ -1695,10 +1725,15 @@ async function buildLivePositionsList(): Promise<{
 
   for (const v of bwList) {
     const input = barentsWatchInput(v);
-    const normalized = input && normalizeLiveVessel(input);
+    const normalized = input && normalizeAndCheck(input);
     if (!normalized) continue;
     const existing = byMmsi.get(normalized.mmsi);
     byMmsi.set(normalized.mmsi, existing ? mergeFeedRecords(existing, normalized) : normalized);
+  }
+
+  for (const v of byMmsi.values()) {
+    const why = spoofingReasons(v.mmsi, now);
+    if (why.length) v.spoofing = why;
   }
 
   sweepStaticCache();
@@ -1786,6 +1821,7 @@ app.get('/api/vessels/search', async (req, res) => {
       sanctioned: !!v.sanctioned,
       shadowfleet: !!v.shadowfleet,
       sanctionedMaster: !!v.sanctionedMaster,
+      spoofing: spoofingReasons(v.mmsi),
       military: !!v.military,
       research: !!v.research,
       shipType: v.shipType,
@@ -2101,6 +2137,16 @@ async function fetchHistoricTrack(mmsi: string, days: number, intervalMin: numbe
     .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat) && p.time)
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
+  // Spoofing checks run on every fix, before the track is thinned out for drawing
+  const rowType = rows.find((p) => p.shipType != null)?.shipType;
+  const shipType =
+    populateFromStaticCache(mmsi, {}).shipType ??
+    (rowType == null ? null : typeof rowType === 'string' ? rowType : getShipTypeDescriptionFromCode(rowType));
+  const spoofing = trackReasons(
+    rows.map((p) => ({ t: Date.parse(p.time), lon: p.lon, lat: p.lat, course: p.course, heading: p.heading, speed: p.speed, shipType }))
+  );
+  noteTrackReasons(mmsi, spoofing);
+
   const keep: typeof rows = [];
   let lastKeptTs = 0;
   const stepMs = intervalMin * 60 * 1000;
@@ -2147,6 +2193,7 @@ async function fetchHistoricTrack(mmsi: string, days: number, intervalMin: numbe
       intervalMin,
       source: 'BarentsWatch Historic AIS (open, Norwegian waters, ≤14 days)',
       maxLookbackDays: 14,
+      spoofing,
     },
   };
 }
@@ -3957,6 +4004,18 @@ app.listen(PORT, () => {
   });
   refreshGur('startup').catch((e) => console.warn('[gur] startup refresh failed', e));
 
+  // FleetLeaks (corroboration of sanctioned / shadow-fleet ships): weekly, ~6 min at its
+  // 30 s crawl delay; on startup only when the last read is over a week old
+  cron.schedule('40 4 * * 2', () => {
+    updateFleetleaks().catch((e) => console.warn('[fleetleaks] cron failed', e));
+  });
+  {
+    const age = fleetleaksAgeMs();
+    if (age == null || age > 7 * DAY_MS) {
+      updateFleetleaks().catch((e) => console.warn('[fleetleaks] startup refresh failed', e));
+    }
+  }
+
   // File-backed area alerts — runs without an open browser (email if SMTP configured)
   // Ships lingering over cables and pipelines: checked every minute (fixes older than 30 min skipped)
   setInterval(() => {
@@ -3968,6 +4027,7 @@ app.listen(PORT, () => {
           return Number.isFinite(t) && now - t <= 30 * 60 * 1000;
         };
         updateInfraWatch(OVERLAYS_DIR, list, (v) => recent(v) && !inHarbour(v), now);
+        sweepSpoofing(now);
       })
       .catch((e) => console.warn('[infra-watch]', e?.message || e));
   }, 60_000);

@@ -49,6 +49,10 @@ export type VesselFeatureProps = {
   shadowfleet: number;
   /** Master on GUR's sanctioned-captains list; only set when the ship itself is not sanctioned */
   sanctionedMaster: number;
+  /** 1 when a report or the track breaks the AIS spoofing rules; the reasons are in spoofingWhy */
+  spoofing: number;
+  /** JSON list of { kind, text, at } from the server, or null */
+  spoofingWhy: string | null;
   military: number;
   research: number;
   country: string;
@@ -64,7 +68,12 @@ export type VesselTrack = {
   /** Sampling interval the track was requested with, minutes */
   intervalMin: number;
   points: { t: number; lon: number; lat: number; speed: number | null; course: number | null }[];
+  /** AIS spoofing evidence the server found in every fix of this track */
+  spoofing?: SpoofReason[];
 };
+
+/** One piece of evidence for "Possible AIS spoofing" (scripts-runner/aisSpoofing.ts). */
+export type SpoofReason = { kind: 'values' | 'jumps'; text: string; at: string };
 
 /** A moment picked on the timeline, drawn as a ghost marker on the map. */
 export type VesselScrub = {
@@ -155,6 +164,7 @@ const MARKER_IMAGES: { name: string; url: string }[] = [
   { name: 'ShadowTriangle', url: '/markers/Circles/shadowtriangle.svg' },
   { name: 'WatchStar', url: '/markers/Circles/watchstar.svg' },
   { name: 'MasterBadge', url: '/markers/Circles/masterbadge.svg' },
+  { name: 'SpoofRing', url: '/markers/Circles/spoofring.svg' },
   { name: 'Norwaytriangle', url: '/markers/Countries/Norwaytriangle.svg' },
   { name: 'Russiatriangle', url: '/markers/Countries/Russiatriangle.svg' },
   { name: 'EUtriangle', url: '/markers/Countries/EUtriangle.svg' },
@@ -281,12 +291,14 @@ function toFeature(v: any) {
   const sanctioned = v.sanctioned === true || v.sanctioned === 1;
   const shadowfleet = v.shadowfleet === true || v.shadowfleet === 1;
   const sanctionedMaster = !sanctioned && (v.sanctionedMaster === true || v.sanctionedMaster === 1);
+  const spoofingWhy =
+    Array.isArray(v.spoofing) && v.spoofing.length ? JSON.stringify(v.spoofing) : typeof v.spoofingWhy === 'string' ? v.spoofingWhy : null;
   const category = mmsiCategory(mmsi, shipType, imo, v.military);
   const flagCountry = mmsiFlagCountry(mmsi);
   const country = countryInfoFromMmsi(mmsi);
   // Never bucket vessels of interest as buoys, even with odd MMSIs
   const ofInterest =
-    sanctioned || shadowfleet || sanctionedMaster || category === 'military' || category === 'research';
+    sanctioned || shadowfleet || sanctionedMaster || !!spoofingWhy || category === 'military' || category === 'research';
   const shipClass =
     !ofInterest && isLikelyAisDevice({ mmsi, imo, name })
       ? 'device'
@@ -317,6 +329,8 @@ function toFeature(v: any) {
     sanctioned: sanctioned ? 1 : 0,
     shadowfleet: shadowfleet ? 1 : 0,
     sanctionedMaster: sanctionedMaster ? 1 : 0,
+    spoofing: spoofingWhy ? 1 : 0,
+    spoofingWhy,
     military: category === 'military' ? 1 : 0,
     research: category === 'research' ? 1 : 0,
     country: country.name,
@@ -451,6 +465,7 @@ export default function VesselLayer({
       'sanction-indicator',
       'shadow-indicator',
       'master-indicator',
+      'spoof-indicator',
       'watch-indicator',
     ];
     const trackSourceId = 'vessel-track';
@@ -522,6 +537,7 @@ export default function VesselLayer({
         sanctioned: Number(p.sanctioned) ? 1 : 0,
         shadowfleet: Number(p.shadowfleet) ? 1 : 0,
         sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
+        spoofing: Number(p.spoofing) ? 1 : 0,
       });
 
       if (!hoverPopup) {
@@ -634,6 +650,8 @@ export default function VesselLayer({
     const watchSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.6, 8, 0.8];
     const watchTranslate: any = [17, -10];
     const watchFilter = (): any => ['in', ['get', 'mmsi'], ['literal', [...watchlistRef.current]]];
+    // Dashed ring around the ship itself: its position may not be real
+    const spoofSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.55, 6, 0.7, 10, 0.95];
 
     function setLayersVisible(on: boolean) {
       const v = on ? 'visible' : 'none';
@@ -778,7 +796,9 @@ export default function VesselLayer({
         v.lon == null ||
         v.lat == null ||
         !Number.isFinite(v.lon) ||
-        !Number.isFinite(v.lat)
+        !Number.isFinite(v.lat) ||
+        // Distance rings from a speed the ship may never have sailed would mislead
+        v.spoofing === 1
       ) {
         clearProjection();
         return;
@@ -1081,6 +1101,7 @@ export default function VesselLayer({
           mmsi,
           days,
           intervalMin,
+          spoofing: Array.isArray(data?.meta?.spoofing) ? data.meta.spoofing : [],
           points: (Array.isArray(pts) ? pts : [])
             .map((f: any) => {
               const p = f?.properties || {};
@@ -1369,6 +1390,24 @@ export default function VesselLayer({
         });
       }
 
+      if (!map.getLayer('spoof-indicator')) {
+        map.addLayer({
+          id: 'spoof-indicator',
+          type: 'symbol',
+          source: sourceId,
+          layout: {
+            'icon-image': 'SpoofRing',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'icon-size': spoofSize,
+            'icon-anchor': 'center',
+          },
+          paint: {
+            'icon-opacity': ['case', ['==', ['get', 'spoofing'], 1], 1, 0],
+          },
+        });
+      }
+
       if (!map.getLayer('watch-indicator')) {
         map.addLayer({
           id: 'watch-indicator',
@@ -1465,6 +1504,8 @@ export default function VesselLayer({
             sanctioned: Number(p.sanctioned) ? 1 : 0,
             shadowfleet: Number(p.shadowfleet) ? 1 : 0,
             sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
+            spoofing: Number(p.spoofing) ? 1 : 0,
+            spoofingWhy: strOrNull(p.spoofingWhy),
             military: Number(p.military) ? 1 : 0,
             research: Number(p.research) ? 1 : 0,
             country: strOrEmpty(p.country) || 'Unknown',
@@ -1664,6 +1705,7 @@ export default function VesselLayer({
         'sanction-indicator',
         'shadow-indicator',
         'master-indicator',
+        'spoof-indicator',
         'watch-indicator',
       ]) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', v);

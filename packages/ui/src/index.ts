@@ -5,6 +5,7 @@ export type {
   VesselFeatureProps,
   VesselLayerStatus,
   VesselTrack,
+  SpoofReason,
   VesselScrub,
 } from './components/VesselLayer';
 export {

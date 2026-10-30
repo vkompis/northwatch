@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+import type { SpoofReason } from './VesselLayer';
 
 export type VesselSearchHit = {
   mmsi: string;
@@ -13,6 +14,7 @@ export type VesselSearchHit = {
   sanctioned?: boolean;
   shadowfleet?: boolean;
   sanctionedMaster?: boolean;
+  spoofing?: SpoofReason[] | null;
   military?: boolean;
   research?: boolean;
   shipType?: string | null;

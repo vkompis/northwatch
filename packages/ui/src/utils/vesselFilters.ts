@@ -7,7 +7,8 @@
  *  2. Ship type — AIS type bucket. Applies to civilian categories only;
  *     military and research vessels are controlled by their category alone.
  *  3. Focus — optional. When any is on, the vessel must match at least one
- *     (Russian flag, sanctioned, shadow fleet, sanctioned master, watchlist).
+ *     (Russian flag, sanctioned, shadow fleet, sanctioned master, possible AIS spoofing,
+ *     watchlist).
  * Plus a freshness toggle (updated within the last 6 hours).
  */
 
@@ -24,7 +25,7 @@ export const CATEGORY_KEYS = [
   'research',
 ] as const satisfies readonly VesselCategory[];
 
-export const FOCUS_KEYS = ['russianFlag', 'sanctioned', 'shadow', 'sanctionedMaster', 'watchlistOnly'] as const;
+export const FOCUS_KEYS = ['russianFlag', 'sanctioned', 'shadow', 'sanctionedMaster', 'spoofing', 'watchlistOnly'] as const;
 
 export type VesselFilterFlags = Record<VesselCategory, boolean> &
   Record<ShipClass, boolean> &
@@ -56,6 +57,7 @@ export const DEFAULT_VESSEL_FILTERS: VesselFilterFlags = {
   sanctioned: false,
   shadow: false,
   sanctionedMaster: false,
+  spoofing: false,
   watchlistOnly: false,
   recent6h: false,
 };
@@ -73,6 +75,7 @@ type FilterableVessel = {
   sanctioned?: number | boolean;
   shadowfleet?: number | boolean;
   sanctionedMaster?: number | boolean;
+  spoofing?: number | boolean;
   military?: number | boolean;
   research?: number | boolean;
   category?: string;
@@ -136,6 +139,7 @@ export function vesselPassesFilter(
   if (f.sanctioned && isOn(v.sanctioned)) return true;
   if (f.shadow && isOn(v.shadowfleet)) return true;
   if (f.sanctionedMaster && isOn(v.sanctionedMaster)) return true;
+  if (f.spoofing && isOn(v.spoofing)) return true;
   if (f.watchlistOnly && toSet(extras?.watchlistMmsis).has(String(v.mmsi || ''))) return true;
   return false;
 }
@@ -170,6 +174,7 @@ const URL_ALIASES: Record<string, keyof VesselFilterFlags> = {
   watchlist: 'watchlistOnly',
   favorites: 'watchlistOnly',
   master: 'sanctionedMaster',
+  spoof: 'spoofing',
   devices: 'device',
   tug_work: 'tugWork',
   'tug-work': 'tugWork',
@@ -184,6 +189,7 @@ const URL_NAMES: Partial<Record<keyof VesselFilterFlags, string>> = {
   recent6h: 'age6',
   watchlistOnly: 'watchlist',
   sanctionedMaster: 'master',
+  spoofing: 'spoof',
 };
 
 function urlKey(token: string): keyof VesselFilterFlags | null {
@@ -220,7 +226,7 @@ export const VESSEL_FILTER_PRESETS: { id: string; label: string; filters: Vessel
   {
     id: 'interest',
     label: 'Vessels of interest',
-    filters: { ...DEFAULT_VESSEL_FILTERS, russianFlag: true, sanctioned: true, shadow: true, sanctionedMaster: true },
+    filters: { ...DEFAULT_VESSEL_FILTERS, russianFlag: true, sanctioned: true, shadow: true, sanctionedMaster: true, spoofing: true },
   },
   {
     id: 'sanctions',

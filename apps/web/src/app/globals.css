@@ -1235,6 +1235,9 @@ body {
 .svalmap-ship-hover .ssh-badge-shadow {
   color: #fdba74;
 }
+.svalmap-ship-hover .ssh-badge-spoof {
+  color: #f0abfc;
+}
 
 .svalmap-ring-hover-popup .maplibregl-popup-content {
   padding: 0;
@@ -1715,6 +1718,35 @@ body {
 }
 .dossier-badge.master {
   border-color: #e8590c;
+}
+.dossier-badge.spoof {
+  border-color: #c026d3;
+}
+/* Why a ship may be spoofing its AIS: one line per piece of evidence, with when it was seen */
+.dossier-spoof {
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border-left: 2px solid #c026d3;
+  background: rgba(192, 38, 211, 0.08);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--sv-ink);
+}
+.dossier-spoof ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.dossier-spoof .spoof-when {
+  display: block;
+  color: var(--sv-muted);
+  font-size: 11px;
+}
+.dossier-spoof p {
+  margin: 8px 0 0;
+  color: var(--sv-muted);
 }
 /* Which list a vessel is on: one entry per listing, with what it says and a link to it */
 .dossier-listings {

@@ -67,6 +67,15 @@ export function StarMarker() {
   );
 }
 
+/** Dashed ring the map draws around ships whose AIS breaks the spoofing rules (public/markers/Circles/spoofring.svg). */
+export function SpoofMarker() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 64 64" aria-hidden="true">
+      <circle cx="32" cy="32" r="26" fill="none" stroke="#c026d3" strokeWidth="8" strokeDasharray="9 11.42" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function DotMarker({ color }: { color: string }) {
   return (
     <svg width="12" height="12" viewBox="-6 -6 12 12" aria-hidden="true">

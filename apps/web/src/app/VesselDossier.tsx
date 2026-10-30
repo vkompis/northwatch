@@ -1,8 +1,8 @@
 'use client';
 
-import type { VesselFeatureProps } from '@svalmap/ui';
+import type { SpoofReason, VesselFeatureProps } from '@svalmap/ui';
 import { HEADER_COLORS, formatLatLonDm, navStatusLabel } from '@svalmap/ui';
-import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, TriangleMarker, WarningMarker } from './LayerRow';
+import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
 const SOURCE_LABELS: Record<string, string> = {
   aisstream: 'AISStream',
@@ -30,7 +30,7 @@ const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)
 
 /** One entry on a sanctions / GUR list, as /api/sanctions/lookup returns it. */
 type Listing = {
-  kind: 'sanction' | 'shadow' | 'gur' | 'master';
+  kind: 'sanction' | 'shadow' | 'gur' | 'master' | 'fleetleaks';
   source: string;
   title: string;
   programmes: string[];
@@ -54,10 +54,32 @@ function mmsiOnlyMismatch(l: Listing, v: VesselFeatureProps): boolean {
   return !!(l.listedName && v.name && !sameName(l.listedName, v.name));
 }
 
+/** Live evidence (on the ship's map record) and what its track showed, newest first, once each. */
+function spoofReasons(v: VesselFeatureProps, fromTrack: SpoofReason[] | undefined): SpoofReason[] {
+  let live: SpoofReason[] = [];
+  try {
+    live = v.spoofingWhy ? JSON.parse(v.spoofingWhy) : [];
+  } catch {
+    /* ignore */
+  }
+  const shape = (r: SpoofReason) => `${r.kind}:${r.text.replace(/\d+/g, '#')}`;
+  const out: SpoofReason[] = [];
+  for (const r of [...live, ...(fromTrack || [])]) if (!out.some((o) => shape(o) === shape(r))) out.push(r);
+  return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
 function ListingMarker({ kind }: { kind: Listing['kind'] }) {
   if (kind === 'sanction') return <WarningMarker edge={SANCTION_EDGE} />;
   if (kind === 'shadow') return <WarningMarker edge={SHADOW_EDGE} />;
   if (kind === 'master') return <MasterMarker />;
+  if (kind === 'fleetleaks') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--sv-accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8 12.5l2.7 2.7L16.5 9.5" />
+      </svg>
+    );
+  }
   return <TriangleMarker color="var(--sv-muted)" />;
 }
 
@@ -100,6 +122,7 @@ export default function VesselDossier({
   onWatch,
   onAreaAlert,
   onExport,
+  trackSpoofing,
 }: {
   vessel: VesselFeatureProps;
   sanctions: any | null;
@@ -109,12 +132,15 @@ export default function VesselDossier({
   onWatch: () => void;
   onAreaAlert: () => void;
   onExport: () => void;
+  /** Spoofing evidence in the ship's loaded track */
+  trackSpoofing?: SpoofReason[];
 }) {
   const sanctioned = !!v.sanctioned || sanctions?.sanctioned === true;
   const shadow = !!v.shadowfleet || sanctions?.shadowfleet === true;
   const listings: Listing[] = Array.isArray(sanctions?.listings) ? sanctions.listings : [];
   const sanctionListings = listings.filter((l) => l.kind === 'sanction');
   const master = !sanctioned && (!!v.sanctionedMaster || listings.some((l) => l.kind === 'master'));
+  const spoofing = spoofReasons(v, trackSpoofing);
   // Badge names the programme; a match that rests on a reused-looking MMSI says so
   const sanctionBadge = sanctionListings.length
     ? sanctionListings.every((l) => mmsiOnlyMismatch(l, v))
@@ -174,7 +200,7 @@ export default function VesselDossier({
         </span>
       </div>
 
-      {(sanctioned || shadow || master || v.category === 'research' || v.category === 'military') && (
+      {(sanctioned || shadow || master || spoofing.length > 0 || v.category === 'research' || v.category === 'military') && (
         <div className="dossier-badges">
           {sanctioned && (
             <span className="dossier-badge sanction">
@@ -186,6 +212,12 @@ export default function VesselDossier({
             <span className="dossier-badge master">
               <MasterMarker />
               Sanctioned master
+            </span>
+          )}
+          {spoofing.length > 0 && (
+            <span className="dossier-badge spoof">
+              <SpoofMarker />
+              Possible AIS spoofing
             </span>
           )}
           {shadow && (
@@ -209,6 +241,26 @@ export default function VesselDossier({
         </div>
       )}
 
+      {spoofing.length > 0 && (
+        <div className="dossier-spoof">
+          <ul>
+            {spoofing.map((r) => (
+              <li key={`${r.kind}-${r.text}`}>
+                {r.text}
+                <span className="spoof-when">
+                  {utc(r.at)} · {ago(r.at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p>
+            A real ship with working AIS and GPS does not report this. Its AIS may be faked, or its GPS
+            jammed or spoofed, so the position shown may not be where it is. Compare the track and
+            satellite images.
+          </p>
+        </div>
+      )}
+
       <dl className="dossier-facts">
         {facts.map(([k, val]) => (
           <div key={k} className={k === 'Position' || k === 'Last fix' ? 'wide' : undefined}>
@@ -222,7 +274,7 @@ export default function VesselDossier({
       {!sanctions ? (
         <p className="dossier-note">Checking the lists…</p>
       ) : listings.length === 0 ? (
-        <p className="dossier-note">Not on the EU, OpenSanctions or Ukraine GUR lists.</p>
+        <p className="dossier-note">Not on the EU, OpenSanctions, Ukraine GUR or FleetLeaks lists.</p>
       ) : (
         <ul className="dossier-listings">
           {listings.map((l, i) => (
@@ -245,6 +297,12 @@ export default function VesselDossier({
                     .filter(Boolean)
                     .join(' · ')}
                 </div>
+                {l.kind === 'fleetleaks' && !sanctioned && !mmsiOnlyMismatch(l, v) && (
+                  <div className="listing-warn">
+                    FleetLeaks lists this ship as sanctioned, but it is not on the lists NorthWatch reads.
+                    Check the official list FleetLeaks names before relying on it.
+                  </div>
+                )}
                 {mmsiOnlyMismatch(l, v) && (
                   <div className="listing-warn">
                     Listed under another name or IMO — this MMSI may have been reused. Check the entry before relying on it.

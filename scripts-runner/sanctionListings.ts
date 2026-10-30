@@ -4,7 +4,8 @@
  *
  * "sanction" = formal sanctions (EU designations, programmes carried by OpenSanctions);
  * "shadow" = GUR shadow fleet; "gur" = GUR marine vessels (war logistics, evasion);
- * "master" = the ship's master is on GUR's list of sanctioned captains.
+ * "master" = the ship's master is on GUR's list of sanctioned captains;
+ * "fleetleaks" = FleetLeaks' independent tracker lists it as sanctioned (corroboration).
  */
 import fs from 'fs';
 import {
@@ -15,12 +16,13 @@ import {
   readOpenSanctionsVessels,
 } from './sanctionsUpdater';
 import { GUR_CAPTAINS_CSV, GUR_LISTS, GUR_VESSELS_CSV, readGurCaptains, readGurVessels } from './gurVessels';
+import { FLEETLEAKS_FILE, readFleetleaks } from './fleetleaks';
 
-export type ListingKind = 'sanction' | 'shadow' | 'gur' | 'master';
+export type ListingKind = 'sanction' | 'shadow' | 'gur' | 'master' | 'fleetleaks';
 
 export type SanctionListing = {
   kind: ListingKind;
-  source: 'EU' | 'OpenSanctions' | 'GUR' | 'Local';
+  source: 'EU' | 'OpenSanctions' | 'GUR' | 'Local' | 'FleetLeaks';
   title: string;
   programmes: string[];
   /** GUR category, or the sanctioned master's name */
@@ -65,7 +67,16 @@ function euAct(link: string): { url: string; label: string } | null {
 
 let cache: { key: string; byImo: Map<string, Entry[]>; byMmsi: Map<string, Entry[]> } | null = null;
 
-const FILES = [EU_DESIGNATED_CSV, OPENSANCTIONS_VESSELS_CSV, GUR_VESSELS_CSV, GUR_CAPTAINS_CSV];
+const FILES = [EU_DESIGNATED_CSV, OPENSANCTIONS_VESSELS_CSV, GUR_VESSELS_CSV, GUR_CAPTAINS_CSV, FLEETLEAKS_FILE];
+
+const SANCTIONER_NAMES: Record<string, string> = {
+  US: 'United States',
+  EU: 'European Union',
+  UK: 'United Kingdom',
+  CA: 'Canada',
+  AU: 'Australia',
+  NZ: 'New Zealand',
+};
 
 function index() {
   const key = FILES.map((f) => (fs.existsSync(f) ? fs.statSync(f).mtimeMs : 0)).join('|');
@@ -147,6 +158,22 @@ function index() {
     });
   }
 
+  for (const v of readFleetleaks()?.vessels || []) {
+    add({
+      kind: 'fleetleaks',
+      source: 'FleetLeaks',
+      title: 'FleetLeaks tracker',
+      programmes: v.sanctioners.map((c) => `Sanctioned by ${SANCTIONER_NAMES[c] || c}`),
+      detail: [v.type, v.flag ? `${v.flag} flag` : null].filter(Boolean).join(' · ') || null,
+      listedName: v.name || null,
+      listedImo: v.imo,
+      listedMmsi: v.mmsi,
+      since: null,
+      url: v.url,
+      urlLabel: 'FleetLeaks',
+    });
+  }
+
   cache = { key, byImo, byMmsi };
   return cache;
 }
@@ -167,7 +194,7 @@ export function sanctionListings(imo: string | null, mmsi: string | null): Sanct
   const out = [...found.values()];
   // OpenSanctions re-publishes GUR's shadow fleet; keep GUR's own entry when both are there
   const gurShadow = new Set(out.filter((l) => l.kind === 'shadow' && l.source === 'GUR').map((l) => l.listedImo));
-  const order: ListingKind[] = ['sanction', 'shadow', 'master', 'gur'];
+  const order: ListingKind[] = ['sanction', 'shadow', 'master', 'fleetleaks', 'gur'];
   return out
     .filter((l) => !(l.kind === 'shadow' && l.source === 'OpenSanctions' && gurShadow.has(l.listedImo)))
     .sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));

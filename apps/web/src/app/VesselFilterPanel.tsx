@@ -20,6 +20,7 @@ import LayerRow, {
   MasterMarker,
   SANCTION_EDGE,
   SHADOW_EDGE,
+  SpoofMarker,
   StarMarker,
   TriangleMarker,
   WarningMarker,
@@ -63,6 +64,7 @@ export default function VesselFilterPanel({
     let sanctioned = 0;
     let shadow = 0;
     let master = 0;
+    let spoofing = 0;
     let watchlist = 0;
     for (const v of vessels) {
       const cat = vesselCategoryKey(v);
@@ -74,9 +76,10 @@ export default function VesselFilterPanel({
       if (v.sanctioned) sanctioned += 1;
       if (v.shadowfleet) shadow += 1;
       if (v.sanctionedMaster) master += 1;
+      if (v.spoofing) spoofing += 1;
       if (watchlistMmsis.has(v.mmsi)) watchlist += 1;
     }
-    return { category, shipClass, russian, sanctioned, shadow, master, watchlist };
+    return { category, shipClass, russian, sanctioned, shadow, master, spoofing, watchlist };
   }, [vessels, watchlistMmsis, filters]);
 
   const set = (key: keyof VesselFilterFlags, on: boolean) => onChange({ ...filters, [key]: on });
@@ -137,6 +140,14 @@ export default function VesselFilterPanel({
         count={counts.master}
         checked={filters.sanctionedMaster}
         onChange={(on) => set('sanctionedMaster', on)}
+      />
+      <LayerRow
+        label="Possible AIS spoofing"
+        sub="Impossible values or position jumps"
+        marker={<SpoofMarker />}
+        count={counts.spoofing}
+        checked={filters.spoofing}
+        onChange={(on) => set('spoofing', on)}
       />
       <LayerRow
         label="Watchlist"

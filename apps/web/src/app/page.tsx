@@ -18,6 +18,7 @@ import type {
   VesselTrack,
   VesselScrub,
   WatchlistState,
+  SpoofReason,
 } from '@svalmap/ui';
 import {
   AlertPanel,
@@ -454,6 +455,8 @@ export default function HomePage() {
         sanctioned?: boolean;
         shadowfleet?: boolean;
         sanctionedMaster?: boolean;
+        /** Spoofing evidence from the server (search hits) */
+        spoofing?: SpoofReason[] | null;
         military?: boolean;
         research?: boolean;
         lon?: number;
@@ -508,6 +511,8 @@ export default function HomePage() {
           sanctioned: opts?.sanctioned ? 1 : 0,
           shadowfleet: opts?.shadowfleet ? 1 : 0,
           sanctionedMaster: opts?.sanctionedMaster ? 1 : 0,
+          spoofing: opts?.spoofing?.length ? 1 : 0,
+          spoofingWhy: opts?.spoofing?.length ? JSON.stringify(opts.spoofing) : null,
           military: category === 'military' ? 1 : 0,
           research: category === 'research' ? 1 : 0,
           country: country.name,
@@ -1082,6 +1087,7 @@ export default function HomePage() {
               sanctioned: hit.sanctioned,
               shadowfleet: hit.shadowfleet,
               sanctionedMaster: hit.sanctionedMaster,
+              spoofing: hit.spoofing,
               military: hit.military,
               research: hit.research,
               lon: hit.lon,
@@ -1234,6 +1240,7 @@ export default function HomePage() {
             return (
               <VesselDossier
                 vessel={selectedVessel}
+                trackSpoofing={track?.mmsi === selectedVessel.mmsi ? track.spoofing : undefined}
                 sanctions={sanctionsInfo}
                 note={watchlist.notes[selectedVessel.mmsi] || ''}
                 onNoteChange={(text) =>

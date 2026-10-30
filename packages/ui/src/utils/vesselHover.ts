@@ -79,6 +79,7 @@ export type VesselHoverInput = {
   sanctioned?: number | boolean | null;
   shadowfleet?: number | boolean | null;
   sanctionedMaster?: number | boolean | null;
+  spoofing?: number | boolean | null;
 };
 
 function isFlagOn(v: number | boolean | string | null | undefined): boolean {
@@ -122,6 +123,7 @@ export function buildVesselHoverHtml(p: VesselHoverInput): string {
   const sanctioned = isFlagOn(p.sanctioned);
   const shadow = isFlagOn(p.shadowfleet);
   const master = !sanctioned && isFlagOn(p.sanctionedMaster);
+  const spoofing = isFlagOn(p.spoofing);
 
   const markerBg =
     cat === 'rest' ? 'rgba(15,23,42,0.9)' : accent;
@@ -141,6 +143,11 @@ export function buildVesselHoverHtml(p: VesselHoverInput): string {
       ? `<div class="ssh-badge ssh-badge-master">` +
         `<img src="/markers/Circles/masterbadge.svg" alt="" width="13" height="13" />` +
         `<span>Sanctioned master</span></div>`
+      : '') +
+    (spoofing
+      ? `<div class="ssh-badge ssh-badge-spoof">` +
+        `<img src="/markers/Circles/spoofring.svg" alt="" width="13" height="13" />` +
+        `<span>Possible AIS spoofing</span></div>`
       : '');
 
   return (
