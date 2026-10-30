@@ -2,7 +2,7 @@
 
 ## System Overview
 
-SvalMap is a maritime monitoring system focused on the Svalbard Fisheries Protection Zone and the North Atlantic north of 54°N. The **live map** is driven by `scripts-runner` (port 8787). `apps/api` and `apps/jobs` are a parallel BigQuery / incident path that is **not** required for the Next.js UI today.
+SvalMap is a maritime monitoring system focused on the Svalbard Fisheries Protection Zone and the North Atlantic north of 54°N. The **live map** is driven by `scripts-runner` (port 8787). There is no database or other paid storage.
 
 ## Core Components
 
@@ -10,10 +10,6 @@ SvalMap is a maritime monitoring system focused on the Svalbard Fisheries Protec
 - **Web App** (`apps/web`): Next.js + MapLibre; polls `/api/live-positions` ~every 20s
 - **scripts-runner**: Express API — AISStream + BarentsWatch merge, 24h tracks, GFW proxy, sanctions / shadow caches, Copernicus ice edge, static overlays, Kystverket nav warnings
 - **packages/ui**: VesselLayer, OverlayLayers, GfwLayers, IncidentLayer (nav warnings)
-
-### Parallel / optional
-- **API** (`apps/api`): Express on :3001 — AOIs, proximity helpers, legacy BarentsWatch vessel API shapes
-- **Jobs** (`apps/jobs`): Cloud Run-style AIS ingest + SQL incident detection into BigQuery (not wired to MapCanvas)
 
 ### Packages
 - **Types** (`packages/types`): Shared TypeScript interfaces
@@ -27,9 +23,9 @@ SvalMap is a maritime monitoring system focused on the Svalbard Fisheries Protec
 - Sanctions / shadow / military MMSI sets loaded from `data/source/` (portable via `SVALMAP_ROOT` / `DATA_DIR`)
 - Static GeoJSON under `data/source/overlays/`
 
-### Optional storage
-- **BigQuery GIS**: Historical positions / incident SQL (`apps/jobs`, `ingestAIS.ts`)
-- **Firestore**: Documented for UI summaries; not used by the current map page
+### Storage
+- No database: live state is in memory and everything else is files under `data/` (see `docs/DATA_MODEL.md`)
+- Historic tracks come from BarentsWatch on demand
 
 ### Data sources
 - AISStream (N Atlantic ≥54°N) + BarentsWatch live / historic

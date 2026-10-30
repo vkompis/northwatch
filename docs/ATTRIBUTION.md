@@ -102,13 +102,6 @@ This document provides proper attribution and credits for all data sources, thir
   - **Attribution**: "© OpenStreetMap contributors"
   - **Website**: https://www.openstreetmap.org/
 
-### Cloud Infrastructure
-- **Google Cloud Platform**
-  - **Service**: Cloud computing and hosting
-  - **License**: Commercial service
-  - **Attribution**: "Powered by Google Cloud Platform"
-  - **Services Used**: Cloud Run, BigQuery, Firestore, Cloud Storage
-
 ### Development Tools
 - **Next.js**
   - **Service**: React framework

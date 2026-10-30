@@ -16,19 +16,6 @@ export const config = {
     defaultZoom: 3.5,
   },
 
-  // Database configuration
-  database: {
-    bigQuery: {
-      projectId: process.env.BIGQUERY_PROJECT_ID || 'svalmap-project',
-      datasetId: process.env.BIGQUERY_DATASET_ID || 'maritime_data',
-      location: process.env.BIGQUERY_LOCATION || 'europe-west1',
-    },
-    firestore: {
-      projectId: process.env.FIRESTORE_PROJECT_ID || 'svalmap-project',
-      collectionPrefix: process.env.FIRESTORE_COLLECTION_PREFIX || 'svalmap',
-    },
-  },
-
   // API configuration
   api: {
     port: parseInt(process.env.API_PORT || '3001'),

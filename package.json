@@ -17,11 +17,6 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "prepare": "husky install",
-    "load:assets": "ts-node apps/jobs/scripts/loadAssets.ts",
-    "load:norwatch": "ts-node apps/jobs/scripts/loadNorMilWatchlist.ts",
-    "derive:aoi": "ts-node apps/jobs/scripts/deriveAOI.ts",
-    "load:sanctions": "ts-node apps/jobs/scripts/loadSanctions.ts",
-    "load:shadowfleet": "ts-node apps/jobs/scripts/loadShadowFleet.ts",
     "load:sodir-facilities": "scripts-runner/node_modules/.bin/tsx scripts-runner/fetchSodirFacilities.ts",
     "load:sodir-pipelines": "scripts-runner/node_modules/.bin/tsx scripts-runner/fetchSodirPipelines.ts"
   },
@@ -34,8 +29,7 @@
     "lint-staged": "^15.2.0",
     "prettier": "^3.1.0",
     "turbo": "^1.11.0",
-    "typescript": "^5.3.0",
-    "ts-node": "^10.9.0"
+    "typescript": "^5.3.0"
   },
   "engines": {
     "node": ">=18.0.0",

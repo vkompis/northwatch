@@ -4,16 +4,14 @@
 - All code must be written in TypeScript, with strict type checking enabled.
 - Do not hardcode any secrets, tokens, or API keys; always read from environment variables or Secret Manager.
 - All bounding boxes and AOI queries must be clamped to the AOI_WKT polygon.
-- Raw AIS positions must **never** be stored in Firestore or sent directly to the browser.
+- Raw AIS positions must **never** be sent directly to the browser.
 - Use MapLibre, not Mapbox, with tiles and attribution URLs loaded from environment variables.
 - Update cadence is every 5 minutes; no polling faster than this.
-- Always prefer BigQuery GIS for spatial queries and incident detection.
-- All SQL must be parameterized; no string interpolation of user input.
+- Do not add a database or paid storage; keep state in memory or in files under `data/`.
 
 ## Data Flow
-- Ingest AIS → normalize → filter to AOI → store in BigQuery `positions` table.
-- Run detection SQL for proximity, rendezvous, loitering, sanctions, shadow, research vessel incidents.
-- For new incidents: write summaries to Firestore with a cooldown window (default 45 minutes).
+- Ingest AIS → normalize → filter to AOI → hold in the in-memory vessel cache.
+- Run proximity, rendezvous, loitering, sanctions, shadow and research vessel checks in the API.
 - Expose incidents and asset boundaries via API with strict validation and access control.
 
 ## Testing & Quality
@@ -101,20 +99,6 @@
 - Sanitize data before processing
 - Return appropriate error messages
 - Log validation failures for debugging
-
-## Database Patterns
-
-### BigQuery
-- Use GIS functions for spatial queries
-- Partition tables by date
-- Optimize queries with clustering
-- Use materialized views for complex aggregations
-
-### Firestore
-- Structure documents for efficient queries
-- Use subcollections for related data
-- Implement proper indexing strategies
-- Handle offline scenarios gracefully
 
 ## Testing Strategy
 

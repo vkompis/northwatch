@@ -16,16 +16,13 @@ A maritime monitoring map focused on the Svalbard Fisheries Protection Zone and 
 - **Overlays**: EEZ / FPZ, ice edge (Copernicus), cables, petroleum, NSM, firing ranges, ports, nav warnings (active / last 30 days)
 - **GFW events**: Loitering, encounters, AIS-off, port visits (RU / sanctioned / shadow filtered)
 - **Area alerts**: Client polling + file-backed server watcher (email if `SMTP_*` configured; free without email)
-- **Live heuristics**: Proximity / loiter among vessels of interest (no BigQuery required)
-- **Optional paid path**: `apps/jobs` + BigQuery detectors are **not** required for the live map
+- **Live heuristics**: Proximity / loiter among vessels of interest
 
 ## Architecture (what actually runs)
 
 ```
 apps/web          → Next.js map (default API http://localhost:8787)
 scripts-runner    → Production live API (AIS, tracks, GFW proxy, sanctions, ice edge, overlays)
-apps/api          → Legacy / parallel Express API on :3001 (areas, BQ-oriented routes)
-apps/jobs         → Optional BigQuery incident / analytics pipeline
 packages/ui       → MapLibre React layers shared by the web app
 ```
 
@@ -38,16 +35,13 @@ Optional: `API_KEY` (require `X-API-Key`), `TLS_INSECURE=1` (only if TLS verific
 ```
 svalmap/
 ├── apps/
-│   ├── web/          # Next.js frontend with MapLibre integration
-│   ├── api/          # Express REST API (parallel / legacy)
-│   └── jobs/         # Background jobs for BigQuery analytics
+│   └── web/          # Next.js frontend with MapLibre integration
 ├── scripts-runner/   # Live AIS + overlays API used by the web map
 ├── packages/
 │   ├── types/        # Shared TypeScript interfaces
 │   ├── ui/           # Reusable React / MapLibre components
 │   └── config/       # Shared configuration
 ├── data/source/      # GeoJSON overlays, sanctions CSVs, markers
-├── sql/              # BigQuery SQL
 └── docs/             # Architecture, security, deploy notes
 ```
 
@@ -85,7 +79,6 @@ svalmap/
 4. **Access**
    - **Web App**: http://localhost:3000
    - **Live API**: http://localhost:8787 (`/api/health`, `/api/live-positions`)
-   - **Legacy API** (optional): http://localhost:3001
 
 ## Geographic Coverage
 
@@ -107,11 +100,8 @@ svalmap/
 - **GFW** v3 gateway proxy
 - **Copernicus / OSI SAF** ice edge (Python toolbox)
 
-### Optional / parallel
-- **apps/api** + **apps/jobs**: BigQuery GIS, Firestore-oriented incident pipeline (not required for the map UI)
-
 ### Infrastructure
-- Google Cloud Platform / Cloud Run / BigQuery (for the jobs path)
+- No database: in-memory state plus files under `data/`
 - Local static GeoJSON under `data/source/`
 
 ### Development Tools
@@ -147,38 +137,7 @@ svalmap/
 
 ## Deployment
 
-### Google Cloud Platform
-
-1. **Set up GCP project and enable APIs**
-   ```bash
-   # See docs/DEPLOY.md for complete setup
-   gcloud projects create svalmap-project
-   gcloud services enable cloudrun.googleapis.com bigquery.googleapis.com
-   ```
-
-2. **Deploy applications**
-   ```bash
-   # Deploy to Cloud Run
-   gcloud run deploy svalmap-web --image gcr.io/PROJECT_ID/svalmap-web:latest
-   gcloud run deploy svalmap-api --image gcr.io/PROJECT_ID/svalmap-api:latest
-   ```
-
-3. **Set up monitoring and alerts**
-   ```bash
-   # Configure Cloud Monitoring
-   gcloud monitoring workspaces create --project=PROJECT_ID
-   ```
-
-### Docker Deployment
-
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
-
-# Or run individual containers
-docker run -p 3000:3000 svalmap-web:latest
-docker run -p 3001:3001 svalmap-api:latest
-```
+SvalMap runs as two Node processes, the API and the web app. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Testing
 
@@ -208,7 +167,7 @@ npm run lint
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)**: System design and architecture overview
-- **[Data Model](docs/DATA_MODEL.md)**: Database schema and data relationships
+- **[Data Model](docs/DATA_MODEL.md)**: Where live state and data files are kept
 - **[Security](docs/SECURITY.md)**: Security measures and best practices
 - **[Deployment](docs/DEPLOY.md)**: Deployment procedures and infrastructure setup
 - **[Style Guide](docs/STYLEGUIDE.md)**: Code standards and development practices
