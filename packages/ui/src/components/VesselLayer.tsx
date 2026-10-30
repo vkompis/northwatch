@@ -24,6 +24,7 @@ import { buildProjectionRingFeatures } from '../utils/projectionRings';
 import { mapStyleReady } from '../utils/mapSafe';
 import type { MapTheme } from '../utils/kartverketRelief';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
+import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
 
 export type VesselFeatureProps = {
   mmsi: string;
@@ -277,6 +278,10 @@ async function loadIcon(
     console.error('[VesselLayer] Failed to fetch icon', url, e);
   }
 }
+
+/** How often the map reloads the live ship list. The server's own checks (alerts, cables,
+ * spoofing) run every minute regardless; 2 minutes is ~900 m for a ship at 15 kn. */
+const LIVE_REFRESH_MS = 2 * 60 * 1000;
 
 function toFeature(v: any) {
   const lon = Number(v.lon ?? v.longitude);
@@ -1448,17 +1453,7 @@ export default function VesselLayer({
       }
 
       if (!clickHandler) {
-        clickHandler = (e: any) => {
-          if (!interactiveRef.current) return;
-          const f = nearestFeature(map, e.features, e.point);
-          if (!f?.properties || !onSelectRef.current) return;
-          // A moveable rig sits on its own AIS position — its card wins (it links to the vessel)
-          if (map.getLayer('overlay-petroleum-moveable-hit')) {
-            const rigHit = map
-              .queryRenderedFeatures(e.point, { layers: ['overlay-petroleum-moveable-hit'] })
-              .some((r: any) => String(r.properties?.mmsi) === String(f.properties.mmsi));
-            if (rigHit) return;
-          }
+        const selectShip = (e: any, f: any) => {
           e.originalEvent?.stopPropagation?.();
           hideHover();
           const p = f.properties as Record<string, unknown>;
@@ -1479,7 +1474,7 @@ export default function VesselLayer({
           const coords = f.geometry?.coordinates;
           const lon = Array.isArray(coords) ? Number(coords[0]) : null;
           const lat = Array.isArray(coords) ? Number(coords[1]) : null;
-          onSelectRef.current({
+          onSelectRef.current?.({
             mmsi,
             name: strOrEmpty(p.name),
             label: strOrEmpty(p.label) || strOrEmpty(p.name) || `MMSI ${p.mmsi}`,
@@ -1513,6 +1508,19 @@ export default function VesselLayer({
             lon: Number.isFinite(lon as number) ? (lon as number) : null,
             lat: Number.isFinite(lat as number) ? (lat as number) : null,
           });
+        };
+        clickHandler = (e: any) => {
+          if (!interactiveRef.current || !onSelectRef.current) return;
+          const f = nearestFeature(map, e.features, e.point);
+          if (!f?.properties) return;
+          // A moveable rig sits on its own AIS position — its card wins (it links to the vessel)
+          if (map.getLayer('overlay-petroleum-moveable-hit')) {
+            const rigHit = map
+              .queryRenderedFeatures(e.point, { layers: ['overlay-petroleum-moveable-hit'] })
+              .some((r: any) => String(r.properties?.mmsi) === String(f.properties.mmsi));
+            if (rigHit) return;
+          }
+          offerClick(e, CLICK_PRIORITY.ship, () => selectShip(e, f));
         };
         map.on('click', 'ships-hit', clickHandler);
         hoverEnterHandler = (e: any) => {
@@ -1554,6 +1562,7 @@ export default function VesselLayer({
             'gfw-shadow-badge',
             'overlay-cables-hit',
             'overlay-cables-telegeography-hit',
+            'overlay-power-cables-hit',
             'overlay-tg-landings-circle',
             'overlay-ports-hit',
             'overlay-ports-circle',
@@ -1565,7 +1574,10 @@ export default function VesselLayer({
             'overlay-pipelines-old-hit',
             'nav-warnings-fill',
             'nav-warnings-line',
+            'nav-warnings-route',
+            'nav-warnings-route-hit',
             'nav-warnings-point',
+            'nav-warnings-area-marker',
             'nav-warnings-label',
             'ships-hit',
             'vessel-projection-rings',
@@ -1575,8 +1587,10 @@ export default function VesselLayer({
             ? map.queryRenderedFeatures(e.point, { layers: overlayLayerIds })
             : [];
           if (hits.length) return;
-          clearTrack();
-          onDeselectRef.current?.();
+          offerClick(e, CLICK_PRIORITY.background, () => {
+            clearTrack();
+            onDeselectRef.current?.();
+          });
         };
         map.on('click', bgClickHandler);
       }
@@ -1585,9 +1599,11 @@ export default function VesselLayer({
     }
 
     let refreshing = false;
+    let lastRefreshAt = 0;
     async function refresh() {
-      // load / idle / interval can overlap; a slow response must not overwrite a newer one
-      if (refreshing) return;
+      // load / idle / interval can overlap; a slow response must not overwrite a newer one.
+      // A hidden tab loads nothing; it catches up when shown again.
+      if (refreshing || document.hidden) return;
       refreshing = true;
       try {
         await ensureLayers();
@@ -1595,6 +1611,7 @@ export default function VesselLayer({
         const { data } = await axios.get(`${apiBase}/api/live-positions`, {
           timeout: 30000,
         });
+        if (destroyed) return;
         const list = Array.isArray(data) ? data : data?.data || [];
         const features = list.map(toFeature).filter(Boolean);
         allFeaturesRef.current = features as any[];
@@ -1613,6 +1630,7 @@ export default function VesselLayer({
         showSelected();
         // Keep the timeline marker above the selection highlight
         if (scrubRef.current) showScrub();
+        lastRefreshAt = Date.now();
         emitStatus({
           lastUpdate: new Date().toISOString(),
           error: null,
@@ -1634,19 +1652,24 @@ export default function VesselLayer({
         setTimeout(() => {
           if (!destroyed) refresh();
         }, 3000);
-        interval = setInterval(refresh, 20 * 1000);
+        interval = setInterval(refresh, LIVE_REFRESH_MS);
       }
+    };
+    const onVisible = () => {
+      if (!document.hidden && Date.now() - lastRefreshAt >= LIVE_REFRESH_MS) refresh();
     };
 
     start();
     map.once('load', start);
     map.once('idle', start);
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       destroyed = true;
       trackAbort?.abort();
       clearTrackRef.current = null;
       if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
       map.off('load', start);
       map.off('idle', start);
       if (clickHandler) {

@@ -165,7 +165,7 @@ export default function VesselDossier({
   const course = num(v.course);
   const heading = num(v.heading);
   const hasPos = v.lon != null && v.lat != null && Number.isFinite(v.lon) && Number.isFinite(v.lat);
-  const lastFix = utc(v.timestamp);
+  const latestSignal = utc(v.timestamp);
 
   const facts: [string, string | null][] = [
     ['MMSI', v.mmsi],
@@ -177,7 +177,7 @@ export default function VesselDossier({
     ['Destination', v.destination],
     ['ETA', v.eta],
     ['Position', hasPos ? formatLatLonDm(v.lat as number, v.lon as number) : null],
-    ['Last fix', lastFix ? `${ago(v.timestamp)} · ${lastFix}` : null],
+    ['Latest signal', latestSignal ? `${ago(v.timestamp)} · ${latestSignal}` : null],
   ];
 
   return (
@@ -263,7 +263,7 @@ export default function VesselDossier({
 
       <dl className="dossier-facts">
         {facts.map(([k, val]) => (
-          <div key={k} className={k === 'Position' || k === 'Last fix' ? 'wide' : undefined}>
+          <div key={k} className={k === 'Position' || k === 'Latest signal' ? 'wide' : undefined}>
             <dt>{k}</dt>
             <dd className={val ? undefined : 'missing'}>{val || 'Not reported'}</dd>
           </div>

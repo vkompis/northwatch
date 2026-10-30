@@ -3,7 +3,9 @@
  * Docs: https://aisstream.io/documentation
  *
  * Keeps an in-memory cache of latest positions + static/voyage fields for the
- * North Atlantic north of 54°N. The API key must never be exposed to the browser.
+ * North Atlantic north of 54°N. A second connection follows a short list of ships
+ * (Russian research vessels) anywhere in the world, filtered on their MMSI. The API key
+ * must never be exposed to the browser.
  */
 
 import fs from 'fs';
@@ -56,6 +58,8 @@ const POSITION_TYPES = new Set([
 ]);
 
 const STATIC_TYPES = new Set(['ShipStaticData', 'StaticDataReport']);
+const SUBSCRIBED_TYPES = [...POSITION_TYPES, ...STATIC_TYPES];
+const STREAM_URL = 'wss://stream.aisstream.io/v0/stream';
 
 const STALE_MS = 45 * 60 * 1000;
 const SWEEP_MS = 60 * 1000;
@@ -64,6 +68,17 @@ const SILENCE_RECONNECT_MS = 90 * 1000;
 const WATCHDOG_MS = 15 * 1000;
 
 const vesselsByMmsi = new Map<string, AisStreamVessel>();
+
+/** Ships followed anywhere in the world on their own MMSI-filtered connection */
+const worldwideMmsi = new Set<string>();
+/** Far from receivers a followed ship may be heard once a day: keep its last position two weeks */
+const WORLDWIDE_STALE_MS = 14 * 24 * 3600 * 1000;
+const staleMsFor = (mmsi: string) => (worldwideMmsi.has(mmsi) ? WORLDWIDE_STALE_MS : STALE_MS);
+let worldSocket: WebSocket | null = null;
+let worldConnected = false;
+let worldReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let worldAttempt = 0;
+let worldLastMessageAt = 0;
 
 let socket: WebSocket | null = null;
 let reconnectAttempt = 0;
@@ -206,7 +221,7 @@ function applyStatic(v: AisStreamVessel, body: any) {
   // updatedAt is the position time: static reports must not make an old fix look fresh
 }
 
-function handleEnvelope(raw: Buffer | ArrayBuffer | Buffer[] | string) {
+function handleEnvelope(raw: Buffer | ArrayBuffer | Buffer[] | string, feed: 'area' | 'world' = 'area') {
   let text: string;
   if (typeof raw === 'string') text = raw;
   else if (Buffer.isBuffer(raw)) text = raw.toString('utf8');
@@ -220,7 +235,9 @@ function handleEnvelope(raw: Buffer | ArrayBuffer | Buffer[] | string) {
     return;
   }
 
-  lastMessageAt = Date.now();
+  // The worldwide feed is quiet for hours; only the area feed counts for the silence watchdog
+  if (feed === 'world') worldLastMessageAt = Date.now();
+  else lastMessageAt = Date.now();
   messageCount += 1;
 
   const type = String(msg?.MessageType || '');
@@ -249,8 +266,8 @@ function handleEnvelope(raw: Buffer | ArrayBuffer | Buffer[] | string) {
     if (body?.ReportB) applyStatic(v, body.ReportB);
   }
 
-  // Drop vessels that never got a valid position, or that left the AOI
-  if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon) || !inNorthAtlantic(v.lat, v.lon)) {
+  // Drop vessels that never got a valid position, or that left the AOI (followed ships never leave it)
+  if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon) || !(inNorthAtlantic(v.lat, v.lon) || worldwideMmsi.has(mmsi))) {
     if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon)) return;
     vesselsByMmsi.delete(mmsi);
   }
@@ -295,7 +312,7 @@ function connect(apiKey: string) {
   }
 
   connected = false;
-  const ws = new WebSocket('wss://stream.aisstream.io/v0/stream', {
+  const ws = new WebSocket(STREAM_URL, {
     perMessageDeflate: true,
   });
   socket = ws;
@@ -319,14 +336,7 @@ function connect(apiKey: string) {
     const subscription = {
       APIKey: apiKey,
       BoundingBoxes: [SUBSCRIBE_BBOX],
-      FilterMessageTypes: [
-        'PositionReport',
-        'StandardClassBPositionReport',
-        'ExtendedClassBPositionReport',
-        'LongRangeAisBroadcastMessage',
-        'ShipStaticData',
-        'StaticDataReport',
-      ],
+      FilterMessageTypes: SUBSCRIBED_TYPES,
     };
     ws.send(JSON.stringify(subscription));
     console.log(
@@ -359,7 +369,7 @@ function sweepStale() {
   const now = Date.now();
   let removed = 0;
   for (const [mmsi, v] of vesselsByMmsi) {
-    if (now - Math.max(v.updatedAt, v.seenAt) > STALE_MS) {
+    if (now - Math.max(v.updatedAt, v.seenAt) > staleMsFor(mmsi)) {
       vesselsByMmsi.delete(mmsi);
       removed += 1;
     }
@@ -398,7 +408,7 @@ function restoreSnapshot() {
     for (const v of JSON.parse(fs.readFileSync(file, 'utf8')) as AisStreamVessel[]) {
       if (!v?.mmsi || vesselsByMmsi.has(v.mmsi)) continue;
       const seen = Math.max(v.updatedAt || 0, v.seenAt || 0);
-      if (now - seen > STALE_MS) continue;
+      if (now - seen > staleMsFor(v.mmsi)) continue;
       vesselsByMmsi.set(v.mmsi, { ...v, seenAt: v.seenAt || seen, source: 'aisstream' });
       restored += 1;
     }
@@ -424,8 +434,68 @@ function runWatchdog() {
   }
 }
 
-export function startAisStreamClient(): void {
+/**
+ * Second connection: the whole world, but only the followed MMSIs (AISStream allows 200 per
+ * subscription and 3 connections per account). Reconnects slowly; it is quiet by nature.
+ */
+function connectWorldwide(apiKey: string) {
+  if (!worldwideMmsi.size) return;
+  const ws = new WebSocket(STREAM_URL, { perMessageDeflate: true });
+  worldSocket = ws;
+  const subscribeTimer = setTimeout(() => {
+    try {
+      ws.terminate();
+    } catch {
+      /* ignore */
+    }
+  }, 2800);
+  ws.on('open', () => {
+    clearTimeout(subscribeTimer);
+    worldConnected = true;
+    worldAttempt = 0;
+    ws.send(
+      JSON.stringify({
+        APIKey: apiKey,
+        BoundingBoxes: [
+          [
+            [-90, -180],
+            [90, 180],
+          ],
+        ],
+        FiltersShipMMSI: [...worldwideMmsi].slice(0, 200),
+        FilterMessageTypes: SUBSCRIBED_TYPES,
+      })
+    );
+    console.log(`[aisstream] worldwide — following ${worldwideMmsi.size} ships`);
+  });
+  ws.on('message', (data) => {
+    try {
+      handleEnvelope(data as any, 'world');
+    } catch (e: any) {
+      console.warn('[aisstream] worldwide message error', e?.message || e);
+    }
+  });
+  ws.on('error', (err) => {
+    console.warn('[aisstream] worldwide socket error', (err as Error)?.message || err);
+  });
+  ws.on('close', (code, reason) => {
+    clearTimeout(subscribeTimer);
+    worldConnected = false;
+    worldSocket = null;
+    console.warn(`[aisstream] worldwide closed code=${code} reason=${reason?.toString?.() || ''}`);
+    if (worldReconnectTimer) return;
+    const delay = Math.min(10 * 60_000, 5000 * Math.pow(2, worldAttempt));
+    worldAttempt += 1;
+    worldReconnectTimer = setTimeout(() => {
+      worldReconnectTimer = null;
+      connectWorldwide(apiKey);
+    }, delay);
+  });
+}
+
+export function startAisStreamClient(opts?: { worldwideMmsi?: Iterable<string> }): void {
   if (started) return;
+  for (const m of opts?.worldwideMmsi || []) worldwideMmsi.add(padMmsi(m));
   const apiKey = (process.env.AISSTREAM_API_KEY || '').trim();
   if (!apiKey) {
     console.warn('[aisstream] AISSTREAM_API_KEY not set — live North Atlantic stream disabled');
@@ -441,6 +511,7 @@ export function startAisStreamClient(): void {
     });
   }
   connect(apiKey);
+  connectWorldwide(apiKey);
   if (!sweepTimer) sweepTimer = setInterval(sweepStale, SWEEP_MS);
   if (!watchdogTimer) watchdogTimer = setInterval(runWatchdog, WATCHDOG_MS);
 }
@@ -450,8 +521,8 @@ export function getAisStreamVessels(): AisStreamVessel[] {
   const out: AisStreamVessel[] = [];
   for (const v of vesselsByMmsi.values()) {
     if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon)) continue;
-    if (!inNorthAtlantic(v.lat, v.lon)) continue;
-    if (!v.updatedAt || now - v.updatedAt > STALE_MS) continue;
+    if (!inNorthAtlantic(v.lat, v.lon) && !worldwideMmsi.has(v.mmsi)) continue;
+    if (!v.updatedAt || now - v.updatedAt > staleMsFor(v.mmsi)) continue;
     out.push(v);
   }
   return out;
@@ -476,6 +547,12 @@ export function getAisStreamStatus() {
     lastMessageAt: lastMessageAt || null,
     silenceSec: lastMessageAt ? Math.round((Date.now() - lastMessageAt) / 1000) : null,
     bbox: NORTH_ATLANTIC_BBOX,
+    worldwide: {
+      following: worldwideMmsi.size,
+      connected: worldConnected,
+      withPosition: [...worldwideMmsi].filter((m) => Number.isFinite(vesselsByMmsi.get(m)?.lat)).length,
+      lastMessageAt: worldLastMessageAt || null,
+    },
   };
 }
 

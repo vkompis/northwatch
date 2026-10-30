@@ -73,6 +73,7 @@ function copernicusAreaUrl(view: MapView | null): string {
 }
 import LayerRow, { DotMarker, LineMarker, RingMarker } from './LayerRow';
 import VesselDossier from './VesselDossier';
+import ResearchShips from './ResearchShips';
 import VesselTimeline from './VesselTimeline';
 
 const MapCanvas = dynamic(() => import('./MapCanvas'), { ssr: false });
@@ -570,7 +571,7 @@ export default function HomePage() {
     if (hit) openVessel(hit);
   }, [pendingMmsi, liveVessels, openVessel]);
 
-  // Keep the open detail card in step with the 20 s live refresh
+  // Keep the open detail card in step with the 2-minute live refresh
   useEffect(() => {
     setSelection((prev) => {
       if (prev?.kind !== 'vessel') return prev;
@@ -642,7 +643,7 @@ export default function HomePage() {
     if (aisStatus.error) return 'AIS error';
     if (aisStatus.lastUpdate) {
       const t = new Date(aisStatus.lastUpdate);
-      return `${aisStatus.vesselCount} vessels · ${t.toLocaleTimeString()}`;
+      return `${aisStatus.vesselCount} ${aisStatus.vesselCount === 1 ? 'vessel' : 'vessels'} · ${t.toLocaleTimeString()}`;
     }
     return 'Loading ships…';
   }, [aisStatus]);
@@ -677,7 +678,7 @@ export default function HomePage() {
         <>
             <LayerRow
               label="Live ships"
-              sub="AISStream + BarentsWatch · every 20 s"
+              sub="AISStream + BarentsWatch · every 2 min"
               count={liveVessels.length || null}
               checked={shipsVisible}
               onChange={setShipsVisible}
@@ -696,6 +697,10 @@ export default function HomePage() {
                 openVesselByMmsi(mmsi, { name: entry?.name, imo: entry?.imo });
               }}
               onRemove={(mmsi) => setWatchlist((s) => removeWatchEntry(s, mmsi))}
+            />
+            <ResearchShips
+              vessels={liveVessels}
+              onOpen={(mmsi, name) => openVesselByMmsi(mmsi, { name, research: true })}
             />
 
             <button

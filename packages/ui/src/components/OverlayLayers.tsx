@@ -11,6 +11,7 @@ import {
   registerSeabedProtocol,
 } from '../utils/seabedDem';
 import type { MapTheme } from '../utils/kartverketRelief';
+import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
 
 export type OverlayVisibility = {
   'eez-norway': boolean;
@@ -1035,7 +1036,7 @@ export default function OverlayLayers({
 
     async function loadTgLandings() {
       const sourceId = 'overlay-tg-landings';
-      if (map.getSource(sourceId)) return;
+      if (cancelled || map.getSource(sourceId)) return;
       const res = await fetch(`${apiBase}/overlays/${TG_LANDINGS_FILE}`);
       if (!res.ok) return;
       const data = await res.json();
@@ -1115,12 +1116,18 @@ export default function OverlayLayers({
     }
 
     async function boot() {
+      // The map can be torn down while a step is loading; stop before touching it again
       try {
         await Promise.all(OVERLAYS.map((d) => loadOne(d).catch((e) => console.error(e))));
+        if (cancelled) return;
         await loadBathymetry().catch((e) => console.error('[bathymetry]', e));
+        if (cancelled) return;
         await loadPetroleumPoints();
+        if (cancelled) return;
         await loadMoveableRigs().catch((e) => console.error('[rigs]', e));
+        if (cancelled) return;
         await loadTgLandings();
+        if (cancelled) return;
         addMaritimeInfra();
       } catch (e) {
         console.error('[OverlayLayers]', e);
@@ -1162,7 +1169,7 @@ export default function OverlayLayers({
       boot();
     };
 
-    const cableClick = (e: any) => {
+    const cableSelect = (e: any) => {
       const f = e.features?.[0];
       if (!f || !onCableRef.current) return;
       e.originalEvent?.stopPropagation?.();
@@ -1200,7 +1207,7 @@ export default function OverlayLayers({
       });
     };
 
-    const portClick = (e: any) => {
+    const portSelect = (e: any) => {
       const f = e.features?.[0];
       if (!f || !onPortRef.current) return;
       e.originalEvent?.stopPropagation?.();
@@ -1223,7 +1230,7 @@ export default function OverlayLayers({
       });
     };
 
-    const rigClick = (e: any) => {
+    const rigSelect = (e: any) => {
       const f = e.features?.[0];
       if (!f || !onRigRef.current) return;
       e.originalEvent?.stopPropagation?.();
@@ -1254,7 +1261,7 @@ export default function OverlayLayers({
       });
     };
 
-    const pipelineClick = (e: any) => {
+    const pipelineSelect = (e: any) => {
       const f = e.features?.[0];
       if (!f || !onPipelineRef.current) return;
       e.originalEvent?.stopPropagation?.();
@@ -1290,6 +1297,34 @@ export default function OverlayLayers({
           : !(p.inUse === false || p.inUse === 'false'),
         source: isUnused ? 'geonorge' : 'sodir',
       });
+    };
+
+    // Each offers its card; the arbiter opens the most specific thing under the click.
+    // MapLibre deletes e.features once the handler returns, so the card gets a copy.
+    const kept = (e: any) => ({ ...e, features: e.features });
+    const cableClick = (e: any) => {
+      const f = e.features?.[0];
+      if (!f || !onCableRef.current) return;
+      const landing = String(f.layer?.id || '').includes('tg-landings');
+      const ev = kept(e);
+      offerClick(e, landing ? CLICK_PRIORITY.point : CLICK_PRIORITY.cable, () => cableSelect(ev));
+    };
+    const portClick = (e: any) => {
+      if (!e.features?.[0] || !onPortRef.current) return;
+      const ev = kept(e);
+      offerClick(e, CLICK_PRIORITY.point, () => portSelect(ev));
+    };
+    const rigClick = (e: any) => {
+      if (!e.features?.[0] || !onRigRef.current) return;
+      const ev = kept(e);
+      offerClick(e, CLICK_PRIORITY.point, () => rigSelect(ev));
+    };
+    const pipelineClick = (e: any) => {
+      const f = e.features?.[0];
+      if (!f || !onPipelineRef.current) return;
+      const old = String(f.layer?.id || '').includes('pipelines-old');
+      const ev = kept(e);
+      offerClick(e, old ? CLICK_PRIORITY.oldPipeline : CLICK_PRIORITY.pipeline, () => pipelineSelect(ev));
     };
 
     const cableLayers = [

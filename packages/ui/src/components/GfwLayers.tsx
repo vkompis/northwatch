@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useMap } from '../hooks/useMap';
+import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
 
 export type GfwVisibility = {
   loitering: boolean;
@@ -836,8 +837,10 @@ export default function GfwLayers({
         clickHandler = (e: any) => {
           const f = e?.features?.[0];
           if (!f || !onSelectRef.current) return;
-          const event = propsFromFeature(f);
-          if (event) onSelectRef.current(event);
+          offerClick(e, CLICK_PRIORITY.point, () => {
+            const event = propsFromFeature(f);
+            if (event) onSelectRef.current?.(event);
+          });
         };
         enterHandler = () => {
           map.getCanvas().style.cursor = 'pointer';

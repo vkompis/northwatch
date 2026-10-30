@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import { spawn } from 'child_process';
@@ -70,6 +71,8 @@ function httpsAgent() {
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
+// The live ship list is ~1 MB of JSON; gzip cuts what every open map downloads
+app.use(compression());
 
 const API_KEY = (process.env.API_KEY || process.env.SVALMAP_API_KEY || '').trim();
 app.use(cors({
@@ -1421,6 +1424,8 @@ function shouldIncludeVessel(opts: {
     return { include: true, inSvalbard };
   }
 
+  // Followed worldwide: shown wherever they are
+  if (isRussianResearchVessel(mmsi, imo)) return { include: true, inSvalbard: false };
   if (!inNorthAtlanticBox(lon, lat)) return { include: false, inSvalbard: false };
 
   const isRussian = parseInt(mmsi.slice(0, 3), 10) === 273;
@@ -3863,7 +3868,8 @@ app.use(express.static(publicDir));
 app.listen(PORT, () => {
   console.log(`SvalMap server on http://localhost:${PORT}`);
   console.log(`[gfw] base=${GFW_API_BASE} token=${GFW_API_TOKEN ? 'configured' : 'MISSING'}`);
-  startAisStreamClient();
+  // Russian research ships are followed anywhere in the world, not just in the area
+  startAisStreamClient({ worldwideMmsi: RUSSIAN_RESEARCH_VESSELS.map((v) => v.mmsi) });
   console.log(
     `[aisstream] key=${process.env.AISSTREAM_API_KEY ? 'configured' : 'MISSING'} bbox=N≥${NORTH_ATLANTIC_BBOX.minLat}`
   );

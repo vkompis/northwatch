@@ -5,6 +5,7 @@ import { useMap } from '../hooks/useMap';
 import axios from 'axios';
 import { mapStyleReady, safeGetLayer, safeGetSource } from '../utils/mapSafe';
 import { MAP_FONT_REGULAR } from '../utils/mapFonts';
+import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
 
 export type NavWarningProps = {
   kind: 'navarea' | 'coastal' | string;
@@ -55,6 +56,7 @@ const LAYER_IDS = [
   'nav-warnings-fill',
   'nav-warnings-line',
   'nav-warnings-route',
+  'nav-warnings-route-hit',
   'nav-warnings-point',
   'nav-warnings-area-marker',
   'nav-warnings-label',
@@ -207,10 +209,13 @@ export default function IncidentLayer({
         if (!interactiveRef.current || !onSelectRef.current) return;
         const f = e?.features?.[0];
         if (!f) return;
-        e.originalEvent?.stopPropagation?.();
-        const warning = propsFromFeature(f);
-        if (warning) onSelectRef.current(warning);
-        zoomToWarning(f.properties);
+        // Inside a big warning area, a cable or rig under the click is what was meant
+        const area = String(f.layer?.id || '').endsWith('-fill');
+        offerClick(e, area ? CLICK_PRIORITY.warningArea : CLICK_PRIORITY.warning, () => {
+          const warning = propsFromFeature(f);
+          if (warning) onSelectRef.current?.(warning);
+          zoomToWarning(f.properties);
+        });
       };
       enterHandler = () => {
         if (!interactiveRef.current) return;
@@ -292,6 +297,15 @@ export default function IncidentLayer({
               'line-dasharray': [2, 1.5],
             },
             layout: { visibility: 'none', 'line-join': 'round' },
+          });
+          // Routes have no fill to click inside, so give them a wide invisible hit line
+          map.addLayer({
+            id: `${id}-route-hit`,
+            type: 'line',
+            source: id,
+            filter: buildLayerFilter(`${id}-route-hit`, null),
+            paint: { 'line-color': '#000', 'line-width': 14, 'line-opacity': 0 },
+            layout: { visibility: 'none' },
           });
           map.addLayer({
             id: `${id}-point`,
@@ -412,7 +426,7 @@ function buildLayerFilter(layerId: string, recentFilter: any | null): any {
     geom = ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]];
   } else if (layerId.endsWith('-line')) {
     geom = ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]];
-  } else if (layerId.endsWith('-route')) {
+  } else if (layerId.endsWith('-route') || layerId.endsWith('-route-hit')) {
     geom = ['in', ['geometry-type'], ['literal', ['LineString', 'MultiLineString']]];
   } else if (layerId.endsWith('-point')) {
     geom = [

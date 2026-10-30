@@ -227,7 +227,7 @@ export default function VesselTimeline({
         : here.eventLabel
           ? `${shortUtc(scrubT, multiDay)} · ${here.eventLabel} · position from GFW`
           : here.stale
-          ? `${shortUtc(scrubT, multiDay)} · no position — last fix ${duration(here.since)} earlier`
+          ? `${shortUtc(scrubT, multiDay)} · no position, latest signal ${duration(here.since)} earlier`
           : [
               shortUtc(scrubT, multiDay),
               here.speed != null ? `${here.speed.toFixed(1)} kn` : null,
@@ -248,7 +248,7 @@ export default function VesselTimeline({
       label: here.eventLabel
         ? `${shortUtc(scrubT, multiDay)} · ${here.eventLabel}`
         : here.stale
-          ? `${shortUtc(scrubT, multiDay)} · last fix`
+          ? `${shortUtc(scrubT, multiDay)} · latest signal`
           : shortUtc(scrubT, multiDay),
       stale: here.stale,
       follow: pinned || playing,

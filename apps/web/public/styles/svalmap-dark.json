@@ -2690,47 +2690,6 @@
       }
     },
     {
-      "id": "label-suburbs",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "place",
-      "minzoom": 11,
-      "filter": [
-        "==",
-        [
-          "get",
-          "class"
-        ],
-        "suburb"
-      ],
-      "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:no"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Bold"
-        ],
-        "text-size": 13,
-        "text-letter-spacing": 0.08,
-        "text-max-width": 7,
-        "text-padding": 40
-      },
-      "paint": {
-        "text-color": "#fff",
-        "text-halo-color": "#243952",
-        "text-halo-width": 1,
-        "text-halo-blur": 1
-      }
-    },
-    {
       "id": "label-islands",
       "type": "symbol",
       "source": "openmaptiles",
@@ -2752,7 +2711,7 @@
             "get",
             "rank"
           ],
-          5
+          1
         ]
       ],
       "layout": {
@@ -2875,39 +2834,20 @@
       "description": "names of rivers"
     },
     {
-      "id": "label-water-fill-line",
+      "id": "label-water-fill-point",
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "water_name",
       "filter": [
-        "==",
+        "all",
         [
-          "geometry-type"
+          "==",
+          [
+            "geometry-type"
+          ],
+          "Point"
         ],
-        "LineString"
-      ],
-      "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_no"
-          ],
-          [
-            "get",
-            "name:no"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
-        "text-max-angle": 30,
-        "text-letter-spacing": [
+        [
           "match",
           [
             "get",
@@ -2917,51 +2857,9 @@
             "ocean",
             "sea"
           ],
-          0.25,
-          "lake",
-          0.15,
-          0
-        ],
-        "text-font": [
-          "Noto Sans Bold"
-        ],
-        "symbol-placement": "line-center",
-        "text-pitch-alignment": "viewport",
-        "text-size": [
-          "interpolate",
-          [
-            "exponential",
-            1.1
-          ],
-          [
-            "zoom"
-          ],
-          2,
-          12,
-          7,
-          18
+          true,
+          false
         ]
-      },
-      "paint": {
-        "text-color": "#8BB5EB",
-        "text-halo-color": "#061629",
-        "text-halo-width": 1,
-        "text-halo-blur": 1
-      },
-      "description": "names of bodies of water at lines",
-      "minzoom": 4
-    },
-    {
-      "id": "label-water-fill-point",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "water_name",
-      "filter": [
-        "==",
-        [
-          "geometry-type"
-        ],
-        "Point"
       ],
       "layout": {
         "text-line-height": 1.3,
@@ -3309,186 +3207,6 @@
       }
     },
     {
-      "id": "label-settlement-village",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "place",
-      "minzoom": 11,
-      "maxzoom": 15,
-      "filter": [
-        "==",
-        [
-          "get",
-          "class"
-        ],
-        "village"
-      ],
-      "layout": {
-        "text-line-height": 1.1,
-        "text-padding": 20,
-        "text-size": [
-          "interpolate",
-          [
-            "exponential",
-            0.9
-          ],
-          [
-            "zoom"
-          ],
-          11,
-          [
-            "interpolate",
-            [
-              "exponential",
-              0.9
-            ],
-            [
-              "get",
-              "rank"
-            ],
-            11,
-            8,
-            15,
-            4
-          ],
-          15,
-          [
-            "interpolate",
-            [
-              "exponential",
-              0.9
-            ],
-            [
-              "get",
-              "rank"
-            ],
-            11,
-            14,
-            15,
-            12
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Bold"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_no"
-          ],
-          [
-            "get",
-            "name:no"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
-        "text-max-width": 7
-      },
-      "paint": {
-        "text-color": "#fff",
-        "text-halo-color": "#243952",
-        "text-halo-width": 1,
-        "text-halo-blur": 1
-      }
-    },
-    {
-      "id": "label-settlement-town",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "place",
-      "minzoom": 6,
-      "maxzoom": 12,
-      "filter": [
-        "==",
-        [
-          "get",
-          "class"
-        ],
-        "town"
-      ],
-      "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_no"
-          ],
-          [
-            "get",
-            "name:no"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Bold"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "exponential",
-            0.9
-          ],
-          [
-            "zoom"
-          ],
-          5,
-          [
-            "interpolate",
-            [
-              "exponential",
-              0.9
-            ],
-            [
-              "get",
-              "rank"
-            ],
-            3,
-            10,
-            10,
-            6
-          ],
-          12,
-          [
-            "interpolate",
-            [
-              "exponential",
-              0.9
-            ],
-            [
-              "get",
-              "rank"
-            ],
-            6,
-            20,
-            14,
-            16
-          ]
-        ],
-        "text-padding": 20
-      },
-      "paint": {
-        "text-color": "#fff",
-        "text-halo-color": "#243952",
-        "text-halo-width": 1,
-        "text-halo-blur": 1
-      }
-    },
-    {
       "id": "label-settlement-city",
       "type": "symbol",
       "source": "openmaptiles",
@@ -3496,12 +3214,23 @@
       "minzoom": 4,
       "maxzoom": 12,
       "filter": [
-        "==",
+        "all",
         [
-          "get",
-          "class"
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "city"
         ],
-        "city"
+        [
+          "<=",
+          [
+            "get",
+            "rank"
+          ],
+          4
+        ]
       ],
       "layout": {
         "text-field": [
