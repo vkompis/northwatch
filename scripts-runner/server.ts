@@ -55,9 +55,18 @@ import {
 } from './darkVessels';
 import { identitiesForMmsi, latestDatedPosition, recentEnoughForMap } from './gfwLastSeen';
 import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
-import { gurImoSets, sanctionListings } from './sanctionListings';
+import { gurImoSets, listedImoForShip, sanctionListings } from './sanctionListings';
 import { fleetleaksAgeMs, updateFleetleaks } from './fleetleaks';
-import { noteReport, noteTrackReasons, spoofingReasons, sweepSpoofing, trackReasons } from './aisSpoofing';
+import {
+  currentSameSpotClusters,
+  noteReport,
+  noteSameSpotClusters,
+  noteTrackReasons,
+  spoofingReasons,
+  sweepSpoofing,
+  trackReasons,
+  type SpotReport,
+} from './aisSpoofing';
 import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
@@ -1405,7 +1414,12 @@ function normalizeLiveVessel(input: {
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
 
   const imoRaw = input.imo != null && input.imo !== '' ? String(input.imo) : '';
-  const imoStr = imoRaw && imoRaw !== '0' ? imoRaw : '';
+  // Many ships go long between static reports, so an IMO can come from our lists instead. Sanctions
+  // lists such as the EU's match on IMO only, and this keeps those ships from going unflagged.
+  const imoStr =
+    (imoRaw && imoRaw !== '0' ? imoRaw : '') ||
+    listedImoForShip(mmsiStr, input.vessel_name || staticInfoByMmsi[mmsiStr]?.vessel_name) ||
+    '';
   const shipTypeRaw = input.shipType ?? input.shipTypeCode ?? null;
   const shipType =
     typeof shipTypeRaw === 'string'
@@ -1615,27 +1629,29 @@ async function buildLivePositionsList(): Promise<{
   const now = Date.now();
   // Every report from both feeds goes through the spoofing checks before the merge. Ships with
   // evidence are shown wherever they are in the North Atlantic box, like ships on the lists.
+  const latestReports = new Map<string, SpotReport>();
   const normalizeAndCheck = (input: any) => {
     const mmsi = String(input.mmsi || '').replace(/\D/g, '').padStart(9, '0').slice(-9);
     const typeRaw = input.shipType ?? input.shipTypeCode ?? null;
-    noteReport(
-      mmsi,
-      {
-        t: Date.parse(String(input.timestamp ?? '')),
-        lon: Number(input.lon),
-        lat: Number(input.lat),
-        course: input.course,
-        heading: input.heading,
-        speed: input.speed,
-        shipType:
-          typeRaw == null
-            ? populateFromStaticCache(mmsi, {}).shipType
-            : typeof typeRaw === 'string'
-              ? typeRaw
-              : getShipTypeDescriptionFromCode(typeRaw),
-      },
-      now
-    );
+    const report = {
+      t: Date.parse(String(input.timestamp ?? '')),
+      lon: Number(input.lon),
+      lat: Number(input.lat),
+      course: input.course,
+      heading: input.heading,
+      speed: input.speed,
+      shipType:
+        typeRaw == null
+          ? populateFromStaticCache(mmsi, {}).shipType
+          : typeof typeRaw === 'string'
+            ? typeRaw
+            : getShipTypeDescriptionFromCode(typeRaw),
+    };
+    noteReport(mmsi, report, now);
+    const prev = latestReports.get(mmsi);
+    if (!prev || report.t > prev.t) {
+      latestReports.set(mmsi, { ...report, mmsi, name: input.vessel_name || staticInfoByMmsi[mmsi]?.vessel_name });
+    }
     const shown = normalizeLiveVessel(input);
     if (shown || !spoofingReasons(mmsi, now).length || !inNorthAtlanticBox(Number(input.lon), Number(input.lat))) return shown;
     return normalizeLiveVessel(input, { ignoreDisplayRules: true });
@@ -1670,6 +1686,8 @@ async function buildLivePositionsList(): Promise<{
     byMmsi.set(normalized.mmsi, existing ? mergeFeedRecords(existing, normalized) : normalized);
   }
 
+  // Ships this marks that are outside the display rules appear from the next refresh
+  noteSameSpotClusters([...latestReports.values()], now);
   for (const v of byMmsi.values()) {
     const why = spoofingReasons(v.mmsi, now);
     if (why.length) v.spoofing = why;
@@ -2001,6 +2019,20 @@ app.get('/api/incidents/live', async (req, res) => {
         minutes,
         // Ships of interest keep their rank; any other ship comes after them
         rank: why ? why.rank : 5,
+      });
+    }
+
+    // Spoofed GPS: a group of ships all reporting one false spot
+    for (const c of currentSameSpotClusters()) {
+      incidents.push({
+        id: `same-spot-${c.lat.toFixed(2)}-${c.lon.toFixed(2)}`,
+        type: 'spoofing',
+        title: `Likely spoofed GPS · ${c.ships.length} ships at one spot`,
+        message: c.ships.map((r) => r.name || r.mmsi).slice(0, 6).join(', ') + (c.ships.length > 6 ? ' and more' : ''),
+        mmsi: c.ships.map((r) => r.mmsi),
+        lon: c.lon,
+        lat: c.lat,
+        rank: 0,
       });
     }
 

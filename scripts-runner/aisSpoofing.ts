@@ -1,6 +1,6 @@
 /**
  * "Possible AIS spoofing": raised only on reports that are impossible, never on what is merely
- * unusual. Two kinds of evidence:
+ * unusual. Three kinds of evidence:
  *
  * 1. Values AIS cannot carry, or no such ship can reach: a course over 360° (other than the
  *    "not available" codes), a heading of 360–510°, or 40 kn or more for a cargo ship, tanker,
@@ -9,6 +9,9 @@
  *    more. One bad fix (out and back) does not count. It takes a pattern: jumping back and
  *    forth (3 jumps, and at least 1 step in 5), or a jump after which the ship keeps reporting
  *    from the new place (2 fixes before it, 3 after it over 10 minutes or more).
+ * 3. Several ships reporting one spot at speeds they could not hold there: 5 ships or more within
+ *    1 km, 3 or more of them at 30 kn or more. Ships crowd together in harbour, but not at speed.
+ *    This is what spoofed GPS looks like: every ship in range gets the same false position.
  *
  * A bad value counts for as long as a feed still shows that report, and 6 hours after. Jumps
  * count while both fixes are within the last 6 hours.
@@ -19,7 +22,7 @@
 import { MID_COUNTRIES } from '../packages/ui/src/utils/mid';
 import { haversineKm } from './darkVessels';
 
-export type SpoofReason = { kind: 'values' | 'jumps'; text: string; at: string };
+export type SpoofReason = { kind: 'values' | 'jumps' | 'same-spot'; text: string; at: string };
 
 export type Fix = { t: number; lon: number; lat: number };
 
@@ -34,6 +37,14 @@ const TRACK_KEEP_MS = 24 * 3600e3;
 /** Live fixes are kept at most every 10 minutes, unless the ship has jumped (~6000 ships in memory) */
 const SAMPLE_MS = 10 * 60 * 1000;
 const MAX_FIXES = 60;
+const SAME_SPOT_KM = 1;
+const SAME_SPOT_MIN_SHIPS = 5;
+const SAME_SPOT_MIN_FAST = 3;
+const SAME_SPOT_FAST_KN = 30;
+/** Reports further apart than this are not ships in one place at one time */
+const SAME_SPOT_WINDOW_MS = 2 * 3600e3;
+/** These can really do 30 kn in company, so they don't count as impossibly fast */
+const FAST_BY_DESIGN = /high speed|military|law enforcement|search and rescue|pleasure/i;
 const SLOW_TYPES = /^(cargo|tanker|fishing|tug|towing)/i;
 const SLOW_NAMES: Record<string, string> = {
   cargo: 'a cargo ship',
@@ -138,6 +149,55 @@ export function jumpReasons(fixes: Fix[]): SpoofReason[] {
   return [];
 }
 
+export type SpotReport = Fix & { mmsi: string; name?: string | null; speed?: unknown; shipType?: unknown };
+
+export type SameSpotCluster = { lon: number; lat: number; ships: SpotReport[]; fast: number; at: number };
+
+const isImpossiblyFast = (r: SpotReport) => {
+  const speed = num(r.speed);
+  // 102.2+ and 63 are the "not available" codes
+  return (
+    speed != null &&
+    speed >= SAME_SPOT_FAST_KN &&
+    speed < 102.2 &&
+    speed !== 63 &&
+    !FAST_BY_DESIGN.test(typeof r.shipType === 'string' ? r.shipType : '')
+  );
+};
+
+/** Groups of ships reporting one spot at speeds they could not hold there. */
+export function findSameSpotClusters(reports: SpotReport[], now = Date.now()): SameSpotCluster[] {
+  const recent = reports.filter(
+    (r) => isShipStation(r.mmsi) && Number.isFinite(r.lon) && Number.isFinite(r.lat) && now - r.t <= SAME_SPOT_WINDOW_MS
+  );
+  const taken = new Set<string>();
+  const clusters: SameSpotCluster[] = [];
+  for (const seed of recent) {
+    if (taken.has(seed.mmsi) || !isImpossiblyFast(seed)) continue;
+    const ships = recent.filter((r) => !taken.has(r.mmsi) && haversineKm(seed, r) <= SAME_SPOT_KM);
+    const fast = ships.filter(isImpossiblyFast).length;
+    if (ships.length < SAME_SPOT_MIN_SHIPS || fast < SAME_SPOT_MIN_FAST) continue;
+    for (const r of ships) taken.add(r.mmsi);
+    clusters.push({
+      lon: ships.reduce((a, r) => a + r.lon, 0) / ships.length,
+      lat: ships.reduce((a, r) => a + r.lat, 0) / ships.length,
+      ships,
+      fast,
+      at: Math.max(...ships.map((r) => r.t)),
+    });
+  }
+  return clusters;
+}
+
+function sameSpotText(c: SameSpotCluster, mmsi: string): string {
+  const others = c.ships.filter((r) => r.mmsi !== mmsi).map((r) => r.name || r.mmsi);
+  const named = others.length > 4 ? `${others.slice(0, 4).join(', ')} and ${others.length - 4} more` : others.join(', ');
+  return (
+    `Reports the same spot as ${others.length} other ships (${named}), ${c.fast} of the ${c.ships.length} at ` +
+    `${SAME_SPOT_FAST_KN} kn or more. Likely spoofed GPS: the ship is probably not here`
+  );
+}
+
 /** Every reason found in a stretch of track (values reported in it, and its jump pattern). */
 export function trackReasons(reports: Report[]): SpoofReason[] {
   const out: SpoofReason[] = [];
@@ -155,6 +215,21 @@ export function trackReasons(reports: Report[]): SpoofReason[] {
 }
 
 // --- Live tracker -------------------------------------------------------------------------------
+
+let sameSpotClusters: SameSpotCluster[] = [];
+
+/** Check the latest report of every ship for groups at one spot, and mark the ships in them. */
+export function noteSameSpotClusters(reports: SpotReport[], now = Date.now()): void {
+  sameSpotClusters = findSameSpotClusters(reports, now);
+  for (const c of sameSpotClusters) {
+    for (const r of c.ships) {
+      const reason: SpoofReason = { kind: 'same-spot', text: sameSpotText(c, r.mmsi), at: new Date(c.at).toISOString() };
+      state(r.mmsi).values.set('same-spot', { reason, seenAt: now });
+    }
+  }
+}
+
+export const currentSameSpotClusters = () => sameSpotClusters;
 
 type ShipState = {
   fixes: Fix[];

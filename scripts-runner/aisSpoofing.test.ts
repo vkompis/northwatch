@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { jumpReasons, noteReport, spoofingReasons, sweepSpoofing, trackReasons, valueReasons } from './aisSpoofing';
+import {
+  findSameSpotClusters,
+  jumpReasons,
+  noteReport,
+  noteSameSpotClusters,
+  spoofingReasons,
+  sweepSpoofing,
+  trackReasons,
+  valueReasons,
+} from './aisSpoofing';
 
 const T0 = Date.parse('2026-10-29T00:00:00Z');
 const min = 60_000;
@@ -120,6 +129,58 @@ function steady(n: number, kn: number, stepMin: number, start = T0, lon0 = 10) {
   noteReport('111257514', { t: now, lon: 10, lat: 70, speed: 140, shipType: 'Cargo' }, now);
   assert.deepEqual(spoofingReasons('586706003', now), []);
   assert.deepEqual(spoofingReasons('111257514', now), []);
+}
+
+// Several ships at one spot at impossible speeds: spoofed GPS (seen 2026-10-30 south of Moscow)
+{
+  const now = T0;
+  const spot = (mmsi: string, name: string, speed: unknown, shipType = 'Not available', d = 0, t = now) => ({
+    mmsi, name, speed, shipType, t, lon: 38.232 + d / 1000, lat: 54.094,
+  });
+  const seen = [
+    spot('273429690', 'GESPER', 102.3, 'Towing', 1),
+    spot('273431970', 'PROTEY', 53.8, 'Not available', 2),
+    spot('273364290', 'ZUBR', 11.6, 'Reserved', 3),
+    spot('273335020', 'SEVRUGA', 102.3, 'Tug', 4),
+    spot('613003743', 'BONIFACY', 59, 'Not available', 5),
+    spot('273380040', 'DIRAX', 56.2, 'Not available', 6),
+    spot('248195000', 'CYCLADES', 63, 'Cargo', 7),
+    spot('273356450', 'FORT', 49.9, 'Not available', 8),
+    spot('273396190', 'ALTAIR', null, 'Tug', 9),
+    spot('273314450', 'KAMSKAYA', null, 'Cargo', 10),
+    // Far away: not part of it
+    { mmsi: '257956000', name: 'FRIDA KNUTSEN', speed: 12, shipType: 'Tanker', t: now, lon: 5, lat: 60 },
+  ];
+  const clusters = findSameSpotClusters(seen, now);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].ships.length, 10);
+  // 102.3 and 63 are "not available", so they do not count as fast
+  assert.equal(clusters[0].fast, 4);
+
+  // Every ship in it is marked, also those reporting no speed, and the note names the others
+  noteSameSpotClusters(seen, now);
+  const why = spoofingReasons('273396190', now);
+  assert.equal(why.length, 1);
+  assert.equal(why[0].kind, 'same-spot');
+  assert.match(why[0].text, /same spot as 9 other ships \(GESPER, PROTEY, ZUBR, SEVRUGA and 5 more\), 4 of the 10 at 30 kn/);
+  assert.deepEqual(spoofingReasons('257956000', now), []);
+  // It stays for six hours after the group last reported from there
+  noteSameSpotClusters([], now + 3600e3);
+  assert.equal(spoofingReasons('613003743', now + 3600e3).length, 1);
+  assert.equal(spoofingReasons('613003743', now + 7 * 3600e3).length, 0);
+
+  // A crowded harbour is not spoofing: many ships, none fast
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r) => ({ ...r, speed: 0.2 })), now), []);
+  // Too few ships, or too few of them fast
+  assert.deepEqual(findSameSpotClusters(seen.slice(1, 5).map((r) => ({ ...r, speed: 50 })), now), []);
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r, i) => ({ ...r, speed: i < 2 ? 50 : 1 })), now), []);
+  // Fast ferries or patrol boats in company can really do this
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r) => ({ ...r, speed: 35, shipType: 'High speed craft' })), now), []);
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r) => ({ ...r, speed: 35, shipType: 'Military ops' })), now), []);
+  // Reports hours apart, spread out, or from non-ship stations do not count
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r) => ({ ...r, speed: 50, t: now - 3 * 3600e3 })), now), []);
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r, i) => ({ ...r, speed: 50, lon: 38 + i / 10 })), now), []);
+  assert.deepEqual(findSameSpotClusters(seen.slice(0, 10).map((r, i) => ({ ...r, speed: 50, mmsi: `58670600${i}` })), now), []);
 }
 
 console.log('aisSpoofing tests passed');

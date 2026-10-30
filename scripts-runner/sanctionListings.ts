@@ -178,6 +178,32 @@ function index() {
   return cache;
 }
 
+const sameName = (a: string, b: string) =>
+  a.toUpperCase().replace(/[^A-Z0-9]/g, '') === b.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * The IMO for a ship that has not sent its own, from list entries under its MMSI. MMSIs get
+ * reused, so every entry that has an IMO must carry the ship's name and agree on the number.
+ */
+export function pickListedImo(entries: { listedName: string | null; listedImo: string | null }[], name: string): string | null {
+  const withImo = entries.filter((e) => e.listedImo);
+  if (!name.trim() || !withImo.length) return null;
+  if (!withImo.every((e) => e.listedName && sameName(e.listedName, name))) return null;
+  const imos = new Set(withImo.map((e) => e.listedImo));
+  return imos.size === 1 ? withImo[0].listedImo : null;
+}
+
+let indexCheckedAt = 0;
+
+/** Called for every ship without an IMO on each refresh, so the list files are checked once a minute. */
+export function listedImoForShip(mmsi: string, name: string | null | undefined): string | null {
+  if (!cache || Date.now() - indexCheckedAt > 60_000) {
+    index();
+    indexCheckedAt = Date.now();
+  }
+  return pickListedImo(cache?.byMmsi.get(mmsi) || [], name || '');
+}
+
 export function sanctionListings(imo: string | null, mmsi: string | null): SanctionListing[] {
   const { byImo, byMmsi } = index();
   const found = new Map<Entry, SanctionListing>();

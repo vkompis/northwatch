@@ -62,9 +62,11 @@ export default function HowToUse() {
       </p>
       <p>
         <b>Possible AIS spoofing</b> is only raised on what no real ship can report: a course over
-        360°, 40 knots or more for a cargo ship, tanker, fishing vessel or tug, or positions that
-        jump further than any ship can sail (back and forth, or to a new place it then keeps
-        reporting from). One stray position is not enough. The dossier lists what was seen and when.
+        360°, 40 knots or more for a cargo ship, tanker, fishing vessel or tug, positions that jump
+        further than any ship can sail (back and forth, or to a new place it then keeps reporting
+        from), or several ships reporting one spot at impossible speeds. That last one points to
+        spoofed GPS: the ships are probably elsewhere, and <b>Activity</b> lists the spot. One
+        stray position is not enough. The dossier lists what was seen and when.
       </p>
       <p>
         The <b>timeline</b> shows the last 24 hours: speed, position reports, gaps and Global

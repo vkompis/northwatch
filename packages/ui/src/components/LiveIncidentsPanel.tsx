@@ -5,7 +5,7 @@ import axios from 'axios';
 
 export type LiveIncident = {
   id: string;
-  type: 'proximity' | 'loiter' | 'infra';
+  type: 'proximity' | 'loiter' | 'infra' | 'spoofing';
   title: string;
   message: string;
   mmsi: string[];
