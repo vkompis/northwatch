@@ -25,6 +25,7 @@ import {
   type VesselFilterFlags,
 } from '@svalmap/ui';
 import MapViewReporter, { type MapView } from './MapViewReporter';
+import ZoomReadout from './ZoomReadout';
 
 type Props = {
   mapStyle: string;
@@ -111,6 +112,7 @@ export default function MapCanvas({
     >
       <BasemapTheme theme={theme} />
       {onViewChange && <MapViewReporter onChange={onViewChange} />}
+      <ZoomReadout />
       <OverlayLayers
         visibility={overlays}
         onCableSelect={onCableSelect}

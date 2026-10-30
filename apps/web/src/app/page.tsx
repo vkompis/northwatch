@@ -51,6 +51,8 @@ import {
 import VesselFilterPanel from './VesselFilterPanel';
 import MapMenu, { MENU_ICONS, type MapMenuId, type MapMenuItem } from './MapMenu';
 import type { MapView } from './MapViewReporter';
+import DarkLeads from './DarkLeads';
+import HowToUse from './HowToUse';
 
 /** Copernicus Browser on Sentinel-2 true colour over the current map view (its own default date: latest). */
 function copernicusAreaUrl(view: MapView | null): string {
@@ -88,7 +90,6 @@ const DEFAULT_OVERLAYS: OverlayVisibility = {
   'chart-cables': false,
   'chart-pipelines': false,
   'chart-spans': false,
-  'chart-aquaculture': false,
   petroleum: false,
   bathymetry: false,
   'seabed-relief': false,
@@ -925,7 +926,6 @@ export default function HomePage() {
         overlays['chart-cables'],
         overlays['chart-pipelines'],
         overlays['chart-spans'],
-        overlays['chart-aquaculture'],
       ]),
       title: 'Infrastructure',
       content: (
@@ -1000,13 +1000,6 @@ export default function HomePage() {
               checked={overlays['chart-spans']}
               onChange={(on) => setOverlay('chart-spans', on)}
             />
-            <LayerRow
-              label="Aquaculture & moorings"
-              sub="Kartverket · fish farms and mooring cables"
-              marker={<LineMarker color="#818cf8" />}
-              checked={overlays['chart-aquaculture']}
-              onChange={(on) => setOverlay('chart-aquaculture', on)}
-            />
         </>
       ),
     },
@@ -1061,6 +1054,13 @@ export default function HomePage() {
             )}
         </>
       ),
+    },
+    {
+      id: 'guide',
+      label: 'How to use',
+      icon: MENU_ICONS.guide,
+      title: 'How to use NorthWatch',
+      content: <HowToUse />,
     },
   ];
 
@@ -1379,6 +1379,11 @@ export default function HomePage() {
                   {ev.note && (
                     <div className="row muted">{ev.note}</div>
                   )}
+                  <DarkLeads
+                    apiBase={apiBase}
+                    event={ev}
+                    onOpenVessel={(mmsi, name) => openVesselByMmsi(mmsi, { name })}
+                  />
                   <div className="row">
                     <span className="k">Position:</span>
                     <span className="v">

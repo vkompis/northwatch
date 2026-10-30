@@ -688,9 +688,6 @@ body {
 }
 
 /* MapLibre attribution: stay compact until the user expands it */
-.maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) {
-  min-height: 24px;
-}
 
 #legend .legend-toggle {
   background: transparent;
@@ -2419,4 +2416,169 @@ body {
   .detail-open .app-chrome {
     right: min(380px, 85vw);
   }
+}
+
+/* Zoom level, bottom right beside the attribution button; clear of the timeline and the dossier */
+.zoom-readout {
+  position: absolute;
+  right: 48px;
+  bottom: 15px;
+  z-index: 5;
+  padding: 3px 9px;
+  border: 1px solid var(--sv-hair2);
+  border-radius: 11px;
+  background: rgba(16, 29, 37, 0.88);
+  color: var(--sv-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.has-timeline .zoom-readout {
+  bottom: calc(146px + 15px);
+}
+@media (min-width: 720px) {
+  .detail-open .zoom-readout {
+    right: calc(min(380px, 85vw) + 12px);
+  }
+}
+
+/* Dark-vessel leads in the Fishing Watch card */
+.dark-leads .lead {
+  display: block;
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 7px 9px;
+  border: 1px solid var(--sv-hair);
+  border-radius: 6px;
+  background: none;
+  color: var(--sv-ink);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dark-leads .lead:hover {
+  border-color: var(--sv-hair2);
+  background: var(--sv-hair);
+}
+.dark-leads .lead-name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dark-leads .lead-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--sv-muted);
+  font-size: 11.5px;
+}
+.dark-leads .panel-link {
+  display: block;
+}
+
+/* Attribution: a round, centred "i" in the panel style; opens as a readable dark card.
+   Scoped to the map root so it outranks maplibre-gl.css, which loads after this file. */
+.svalmap-map-root .maplibregl-ctrl-bottom-right {
+  z-index: 6;
+}
+.svalmap-map-root .maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact {
+  box-sizing: border-box;
+  min-height: 28px;
+  margin: 0 12px 12px 0;
+  padding: 0;
+  border: 1px solid var(--sv-hair2);
+  border-radius: 14px;
+  background: rgba(16, 29, 37, 0.94);
+  color: var(--sv-ink);
+}
+.svalmap-map-root .maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) {
+  width: 28px;
+  height: 28px;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button::before {
+  content: 'i';
+  color: var(--sv-ink);
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 15px;
+  font-style: italic;
+  font-weight: 600;
+  line-height: 1;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button:focus-visible {
+  outline: 2px solid var(--sv-accent);
+  outline-offset: 2px;
+}
+.svalmap-map-root .maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact-show {
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 8px 36px 9px 12px;
+  border-radius: 10px;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button {
+  top: 1px;
+  right: 1px;
+  background: none;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner {
+  color: var(--sv-ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner a {
+  color: var(--sv-accent);
+  text-decoration: none;
+}
+.svalmap-map-root .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner a:hover {
+  text-decoration: underline;
+}
+
+/* How to use */
+.guide {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sv-muted);
+}
+.guide p {
+  margin: 0 0 10px;
+}
+.guide b {
+  color: var(--sv-ink);
+  font-weight: 600;
+}
+.guide h3 {
+  margin: 18px 0 6px;
+  color: var(--sv-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.guide ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+.guide li {
+  margin: 2px 0;
+}
+.guide ul.guide-keys {
+  padding-left: 0;
+  list-style: none;
+}
+.guide-keys li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.guide-keys svg {
+  flex: none;
 }

@@ -10,7 +10,7 @@ export type ProvenanceBlock = {
 
 export function defaultProvenance(extraSources: string[] = []): ProvenanceBlock {
   return {
-    tool: 'SvalMap',
+    tool: 'NorthWatch',
     exportedAt: new Date().toISOString(),
     sources: [
       'AISStream live AIS',
@@ -44,7 +44,7 @@ export function exportVesselPack(opts: {
     opts.track ? [`BarentsWatch historic track (${opts.track.meta?.days || 1}d)`] : []
   );
   const pack = {
-    type: 'svalmap.vessel-pack',
+    type: 'northwatch.vessel-pack',
     version: 1,
     provenance,
     vessel: opts.vessel,
@@ -55,7 +55,7 @@ export function exportVesselPack(opts: {
   const mmsi = String(opts.vessel.mmsi || 'unknown');
   const stamp = provenance.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
   downloadBlob(
-    `svalmap-vessel-${mmsi}-${stamp}.json`,
+    `northwatch-vessel-${mmsi}-${stamp}.json`,
     new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' })
   );
 
@@ -77,7 +77,7 @@ export function exportVesselPack(opts: {
     }
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     downloadBlob(
-      `svalmap-track-${mmsi}-${stamp}.csv`,
+      `northwatch-track-${mmsi}-${stamp}.csv`,
       new Blob([csv], { type: 'text/csv' })
     );
   }
@@ -95,7 +95,7 @@ export function exportGeoJSONSnapshot(opts: {
   };
   const stamp = provenance.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
   downloadBlob(
-    `svalmap-vessels-${stamp}.geojson`,
+    `northwatch-vessels-${stamp}.geojson`,
     new Blob([JSON.stringify(fc, null, 2)], { type: 'application/geo+json' })
   );
 }

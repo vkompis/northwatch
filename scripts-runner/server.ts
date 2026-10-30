@@ -45,6 +45,14 @@ import {
 import { fetchSodirPipelinesToFile } from './fetchSodirPipelines';
 import { fetchNvePowerCablesToFile, readPowerCablesMeta } from './fetchNvePowerCables';
 import { currentInfraDwell, INFRA_WATCH_RULES, resetInfraWatch, updateInfraWatch } from './infraWatch';
+import {
+  MAX_KN as DARK_MAX_KN,
+  detectionDay,
+  detectionLeadsForGap,
+  gapLeadsForDetection,
+  quietLeadsForDetection,
+  sentinel1Url,
+} from './darkVessels';
 import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
 import { gurImoSets, sanctionListings } from './sanctionListings';
 import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
@@ -2335,6 +2343,12 @@ function classifyGfwVesselInterest(mmsi: string | null, imo: string | null, flag
   };
 }
 
+function gfwLonLat(p: any): { lon: number; lat: number } | null {
+  const lon = Number(p?.lon);
+  const lat = Number(p?.lat);
+  return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
+}
+
 function mapGfwEntry(ev: any, opts?: { requireInterest?: boolean }) {
   const pos = gfwEventPosition(ev);
   if (!pos) return null;
@@ -2386,6 +2400,10 @@ function mapGfwEntry(ev: any, opts?: { requireInterest?: boolean }) {
     shadowfleet: primary.shadowfleet || partner.shadowfleet,
     intentionalDisabling: intentional || null,
     gapDistanceKm: ev.gap?.distanceKm != null ? Number(ev.gap.distanceKm) : null,
+    // Where AIS went off and came back on (for linking radar detections to the gap)
+    offPosition: gfwLonLat(ev.gap?.offPosition),
+    onPosition: gfwLonLat(ev.gap?.onPosition),
+    impliedSpeedKn: ev.gap?.impliedSpeedKnots != null ? Number(ev.gap.impliedSpeedKnots) : null,
     links: ev.links || [],
   };
 }
@@ -2858,6 +2876,100 @@ app.get('/api/gfw/detections', async (req, res) => {
     res.json(payload);
   } catch (e: any) {
     res.status(500).json({ detections: [], error: e?.message || String(e) });
+  }
+});
+
+/** GFW events and SAR detections as cached for the map (waits briefly on a cold start). */
+async function gfwCachedForLeads(): Promise<{ events: any[]; detections: any[] }> {
+  const withTimeout = <T,>(p: Promise<T>, ms: number, fallback: T) =>
+    Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
+  const ev =
+    GFW_EVENTS_CACHE.get('events:720')?.payload ||
+    (await withTimeout(loadGfwEventsShared(720, 500).catch(() => null), 15_000, null));
+  const det = await withTimeout(loadGfwDetectionsShared().catch(() => null), 15_000, null);
+  return { events: ev?.events || [], detections: det?.detections || [] };
+}
+
+/**
+ * Leads for a radar detection with no AIS match: GFW AIS-off gaps whose ship could have
+ * been there that day, and ships of interest last seen nearby before going quiet.
+ */
+app.get('/api/gfw/dark-leads', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    const time = String(req.query.time || '');
+    const d = detectionDay(time);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !d) {
+      return res.status(400).json({ error: 'lat, lon and time are required' });
+    }
+    const det = { time, position: { lon, lat }, matched: false };
+    const { events } = await gfwCachedForLeads();
+    const live = await getLivePositionsList().catch(() => []);
+    const gapLeads = gapLeadsForDetection(det, events).slice(0, 8).map((l) => ({
+      mmsi: l.gap.mmsi,
+      name: l.gap.vessels?.[0] || null,
+      flag: l.gap.flag,
+      russian: !!l.gap.russian,
+      sanctioned: !!l.gap.sanctioned,
+      shadowfleet: !!l.gap.shadowfleet,
+      gapStart: l.gap.time,
+      gapEnd: l.gap.end,
+      kmFromOff: l.kmFromOff,
+      kmToOn: l.kmToOn,
+      detourKm: l.detourKm,
+    }));
+    const quietLeads = quietLeadsForDetection(det, live, (v) => !!interestReason(v) || !!v.sanctionedMaster).map((q) => ({
+      mmsi: String(q.vessel.mmsi),
+      name: q.vessel.vessel_name || null,
+      why: interestReason(q.vessel)?.label || (q.vessel.sanctionedMaster ? 'sanctioned master' : null),
+      lastFix: q.lastFix,
+      hoursSilentBefore: q.hoursSilentBefore,
+      km: q.km,
+    }));
+    res.json({
+      day: d.day,
+      gapLeads,
+      quietLeads,
+      sentinel1Url: sentinel1Url({ lon, lat }, d.day),
+      rules: { maxKn: DARK_MAX_KN, note: 'Could have been there at no more than 15 kn — a lead, not an identification.' },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+/** Radar detections without AIS that the ship of an AIS-off gap could have been. */
+app.get('/api/gfw/gap-radar', async (req, res) => {
+  try {
+    const mmsi = String(req.query.mmsi || '');
+    const time = String(req.query.time || '');
+    const { events, detections } = await gfwCachedForLeads();
+    const gap = events.find((e: any) => e.type === 'ais_off' && e.mmsi === mmsi && e.time === time);
+    if (!gap) return res.status(404).json({ error: 'gap not in the current GFW window' });
+    const leads = detectionLeadsForGap(gap, detections).slice(0, 12).map((l) => {
+      const day = detectionDay(l.det.time)!.day;
+      return {
+        day,
+        lon: l.det.position.lon,
+        lat: l.det.position.lat,
+        kmFromOff: l.kmFromOff,
+        detourKm: l.detourKm,
+        sentinel1Url: sentinel1Url(l.det.position, day),
+      };
+    });
+    const offDay = String(gap.time).slice(0, 10);
+    const onDay = gap.end ? String(gap.end).slice(0, 10) : null;
+    res.json({
+      detections: leads,
+      sentinel1Off: sentinel1Url(gap.offPosition || gap.position, offDay),
+      sentinel1On: gap.onPosition && onDay ? sentinel1Url(gap.onPosition, onDay) : null,
+      offPosition: gap.offPosition || gap.position,
+      onPosition: gap.onPosition || null,
+      rules: { maxKn: DARK_MAX_KN },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || String(e) });
   }
 });
 

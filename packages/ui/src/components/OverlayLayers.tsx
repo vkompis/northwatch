@@ -27,7 +27,6 @@ export type OverlayVisibility = {
   'chart-cables': boolean;
   'chart-pipelines': boolean;
   'chart-spans': boolean;
-  'chart-aquaculture': boolean;
   /** Sodir oil / gas facility points */
   petroleum: boolean;
   /** Depth contours, depth labels and soundings (Open Waters, Kartverket near the coast) */
@@ -269,12 +268,12 @@ const LEGACY_BATHY_LAYERS = [
  * reported for the nautical charts, coast, Svalbard and Jan Mayen. Drawn in chart symbology.
  */
 /**
- * The service only draws each kind from a certain scale (cables from about z12). Cables,
- * spans and moorings are dark grey / dark blue chart ink — inverted on the dark map so they
- * show; pipelines are red and stay red.
+ * The service only draws each kind from a certain scale (cables from about z12). Cables and
+ * spans are dark chart ink — inverted on the dark map so they show; pipelines are red and
+ * stay red.
  */
 const MARITIME_INFRA: {
-  key: 'chart-cables' | 'chart-pipelines' | 'chart-spans' | 'chart-aquaculture';
+  key: 'chart-cables' | 'chart-pipelines' | 'chart-spans';
   layers: string;
   minzoom: number;
   invertOnDark: boolean;
@@ -282,7 +281,6 @@ const MARITIME_INFRA: {
   { key: 'chart-cables', layers: 'kabel_l,kabel_a', minzoom: 12, invertOnDark: true },
   { key: 'chart-pipelines', layers: 'rorledning_l,rorledning_a', minzoom: 8, invertOnDark: false },
   { key: 'chart-spans', layers: 'Luftspenn,bro_l,bro_a,taubane', minzoom: 10, invertOnDark: true },
-  { key: 'chart-aquaculture', layers: 'akvakultur_a,akvakultur_p,fortoyningskabel', minzoom: 10, invertOnDark: true },
 ];
 const chartInkPaint = (invert: boolean, theme: MapTheme) =>
   invert && theme === 'dark'
@@ -827,8 +825,7 @@ export default function OverlayLayers({
           encoding: 'terrarium',
           tileSize: 256,
           maxzoom: 12,
-          attribution:
-            'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Mapzen / AWS Terrain Tiles</a>',
+          // Same tiles as the basemap's land relief, which already credits Mapzen / AWS
         } as any);
       }
 
