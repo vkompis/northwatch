@@ -1,7 +1,7 @@
 'use client';
 
 import type { SpoofReason, VesselFeatureProps } from '@svalmap/ui';
-import { HEADER_COLORS, formatLatLonDm, navStatusLabel } from '@svalmap/ui';
+import { HEADER_COLORS, formatLatLonDm, isRussianResearchVessel, navStatusLabel } from '@svalmap/ui';
 import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -85,6 +85,84 @@ function ListingMarker({ kind }: { kind: Listing['kind'] }) {
 
 const externalLink = { target: '_blank', rel: 'noopener noreferrer' } as const;
 
+/** /api/gfw/vessel-last-seen */
+type GfwLastSeen = {
+  lastSeen?: { label: string; time: string; lon: number; lat: number; sentinel1Url: string } | null;
+  lastTransmission?: string | null;
+  error?: string;
+};
+
+function span(ms: number): string {
+  const h = Math.round(ms / 3600e3);
+  if (h < 48) return `${Math.max(h, 1)} h`;
+  const d = Math.round(h / 24);
+  return d < 60 ? `${d} days` : `${Math.round(d / 30.44)} months`;
+}
+
+/** How GFW's dated position stands against the ship's latest AIS fix. */
+function againstAis(gfwTime: string, aisTime: string | null): { older: boolean; text: string } {
+  const gfw = Date.parse(gfwTime);
+  const ais = aisTime ? Date.parse(aisTime) : NaN;
+  if (!Number.isFinite(ais)) {
+    return { older: false, text: 'No AIS position here, so this is the newest position NorthWatch has for this ship.' };
+  }
+  return gfw < ais
+    ? { older: true, text: `Older than the AIS position above by ${span(ais - gfw)}. Go by the AIS position.` }
+    : { older: false, text: `Newer than the AIS position above by ${span(gfw - ais)}.` };
+}
+
+function GfwLastSeenSection({ data, aisTime }: { data: GfwLastSeen | null; aisTime: string | null }) {
+  const seen = data?.lastSeen;
+  const compared = seen ? againstAis(seen.time, aisTime) : null;
+  const heardLater =
+    seen && data?.lastTransmission && Date.parse(data.lastTransmission) - Date.parse(seen.time) > 24 * 3600e3
+      ? utc(data.lastTransmission)
+      : null;
+  return (
+    <>
+      <h3 className="dossier-h">Last seen by Global Fishing Watch</h3>
+      {!data ? (
+        <p className="dossier-note">Checking Global Fishing Watch…</p>
+      ) : data.error ? (
+        <p className="dossier-note">Global Fishing Watch could not be reached.</p>
+      ) : !seen ? (
+        <p className="dossier-note">
+          Global Fishing Watch has no dated position for this ship.
+          {data.lastTransmission && ` It last received AIS from it on ${utc(data.lastTransmission)}.`}
+        </p>
+      ) : (
+        <div className="dossier-lastseen">
+          <div className="lastseen-where">
+            {utc(seen.time)} · {formatLatLonDm(seen.lat, seen.lon)}
+          </div>
+          <div className="lastseen-kind">
+            {seen.label} · {ago(seen.time)}
+          </div>
+          {compared && <div className={compared.older ? 'listing-warn' : 'lastseen-compare'}>{compared.text}</div>}
+          {heardLater && (
+            <div className="listing-warn">
+              Global Fishing Watch last received AIS from this ship on {heardLater}, with no position, so the
+              ship may have moved since the position above.
+            </div>
+          )}
+          <a className="dossier-link" href={seen.sentinel1Url} {...externalLink}>
+            Sentinel-1 radar for that place and day ↗
+          </a>
+        </div>
+      )}
+      {data && !data.error && (
+        <p className="dossier-note">
+          Only gives positions at port visits, loitering, encounters and AIS gaps, and runs a few days behind.{' '}
+          <a href="https://globalfishingwatch.org" {...externalLink}>
+            Powered by Global Fishing Watch
+          </a>
+          .
+        </p>
+      )}
+    </>
+  );
+}
+
 /**
  * Copernicus Browser on Sentinel-2 true colour, at the ship's position on the day of its
  * last fix — the place to start looking for an image of it. Sentinel-2 is optical: in the
@@ -116,6 +194,7 @@ function copernicusUrl(v: VesselFeatureProps): string {
 export default function VesselDossier({
   vessel: v,
   sanctions,
+  gfwLastSeen,
   note,
   onNoteChange,
   watched,
@@ -126,6 +205,7 @@ export default function VesselDossier({
 }: {
   vessel: VesselFeatureProps;
   sanctions: any | null;
+  gfwLastSeen: GfwLastSeen | null;
   note: string;
   onNoteChange: (text: string) => void;
   watched: boolean;
@@ -269,6 +349,8 @@ export default function VesselDossier({
           </div>
         ))}
       </dl>
+
+      {isRussianResearchVessel(v.mmsi) && <GfwLastSeenSection data={gfwLastSeen} aisTime={v.timestamp} />}
 
       <h3 className="dossier-h">Lists</h3>
       {!sanctions ? (

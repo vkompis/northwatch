@@ -53,6 +53,7 @@ import {
   quietLeadsForDetection,
   sentinel1Url,
 } from './darkVessels';
+import { identitiesForMmsi, latestDatedPosition } from './gfwLastSeen';
 import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
 import { gurImoSets, sanctionListings } from './sanctionListings';
 import { fleetleaksAgeMs, updateFleetleaks } from './fleetleaks';
@@ -1734,7 +1735,16 @@ app.get('/api/vessels/search', async (req, res) => {
     const list = await getLivePositionsList();
     const live = new Set(list.map((v) => v.mmsi));
     const digits = /^[\d\s]+$/.test(q) ? q.replace(/\D/g, '') : '';
-    const candidates = [...list, ...allKnownVessels().filter((v) => !live.has(v.mmsi))];
+    const known = [...list, ...allKnownVessels().filter((v) => !live.has(v.mmsi))];
+    const heard = new Set(known.map((v) => v.mmsi));
+    // Listed research ships no receiver has heard still open a dossier, with no position
+    const unheard = RUSSIAN_RESEARCH_VESSELS.filter((v) => !heard.has(v.mmsi)).map((v) => ({
+      mmsi: v.mmsi,
+      vessel_name: v.name,
+      imo: v.imo,
+      research: true,
+    }));
+    const candidates: any[] = [...known, ...unheard];
     const ranked: { v: any; rank: number }[] = [];
     for (const v of candidates) {
       const rank = searchRank(v, q, digits);
@@ -2674,6 +2684,77 @@ app.get('/api/gfw/events', async (req, res) => {
       String(e);
     console.warn('[gfw/events]', detail);
     res.json({ events: [], error: detail });
+  }
+});
+
+const GFW_LAST_SEEN_CACHE = new Map<string, GfwCacheEntry>();
+const GFW_LAST_SEEN_INFLIGHT = new Map<string, Promise<any>>();
+const GFW_LAST_SEEN_TTL_MS = 6 * 3600e3;
+/** GFW's AIS history starts here; a ship's newest event can be years old */
+const GFW_HISTORY_START = '2012-01-01';
+
+async function loadGfwLastSeen(mmsi: string) {
+  const client = gfwClient();
+  const search = await client.get('/vessels/search', {
+    params: { 'datasets[0]': 'public-global-vessel-identity:latest', query: mmsi, limit: 20 },
+    timeout: 60000,
+  });
+  const { ids, lastTransmission } = identitiesForMmsi(search.data?.entries, mmsi);
+  const events: any[] = [];
+  const endDate = new Date(Date.now() + 24 * 3600e3).toISOString().slice(0, 10);
+  // Sequential — GFW rate-limits / times out under parallel POSTs. Any failure throws, so an
+  // older position is never cached as the latest because the newest dataset was down.
+  for (const dataset of ids.length ? GFW_EVENT_DATASETS : []) {
+    const r = await client.post(
+      '/events',
+      { datasets: [dataset], vessels: ids, startDate: GFW_HISTORY_START, endDate },
+      { params: { limit: 5, offset: 0, sort: '-start' }, timeout: 60000 }
+    );
+    events.push(...(r.data?.entries || []));
+  }
+  const record = latestDatedPosition(events);
+  return {
+    mmsi,
+    lastSeen: record && {
+      ...record,
+      sentinel1Url: sentinel1Url({ lon: record.lon, lat: record.lat }, record.time.slice(0, 10)),
+    },
+    lastTransmission,
+    source: 'gfw-v3-events',
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/** Newest dated position GFW has for a research, sanctioned or shadow-fleet ship. */
+app.get('/api/gfw/vessel-last-seen', async (req, res) => {
+  try {
+    if (!GFW_API_TOKEN) return res.status(400).json({ error: 'GFW_API_TOKEN not configured' });
+    const mmsi = normalizeMmsi(req.query.mmsi);
+    if (!mmsi) return res.status(400).json({ error: 'mmsi required' });
+    // Only ships we follow, to keep GFW use low
+    if (!isRussianResearchVessel(mmsi) && !SANCTIONED_MMSI.has(mmsi) && !SHADOWFLEET_MMSI.has(mmsi)) {
+      return res.status(403).json({ error: 'Only research, sanctioned and shadow-fleet ships' });
+    }
+    const cached = GFW_LAST_SEEN_CACHE.get(mmsi);
+    if (cached && Date.now() - cached.ts < GFW_LAST_SEEN_TTL_MS) {
+      return res.json({ ...cached.payload, cached: true });
+    }
+    let load = GFW_LAST_SEEN_INFLIGHT.get(mmsi);
+    if (!load) {
+      load = loadGfwLastSeen(mmsi)
+        .then((payload) => {
+          GFW_LAST_SEEN_CACHE.set(mmsi, { ts: Date.now(), payload });
+          return payload;
+        })
+        .finally(() => GFW_LAST_SEEN_INFLIGHT.delete(mmsi));
+      GFW_LAST_SEEN_INFLIGHT.set(mmsi, load);
+    }
+    res.json(await load);
+  } catch (e: any) {
+    const detail =
+      e?.response?.data?.messages?.[0]?.detail || e?.response?.data?.error || e?.message || String(e);
+    console.warn('[gfw/last-seen]', detail);
+    res.status(502).json({ error: detail });
   }
 });
 

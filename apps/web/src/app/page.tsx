@@ -48,6 +48,7 @@ import {
   VESSEL_FILTER_PRESETS,
   sameFilters,
   type MapTheme,
+  isRussianResearchVessel,
 } from '@svalmap/ui';
 import VesselFilterPanel from './VesselFilterPanel';
 import MapMenu, { MENU_ICONS, type MapMenuId, type MapMenuItem } from './MapMenu';
@@ -183,6 +184,7 @@ export default function HomePage() {
   const [showIncidents, setShowIncidents] = useState(false);
   const [healthMeta, setHealthMeta] = useState<any>(null);
   const [sanctionsInfo, setSanctionsInfo] = useState<any>(null);
+  const [gfwLastSeen, setGfwLastSeen] = useState<any>(null);
   const [shareHint, setShareHint] = useState<string | null>(null);
   // Light / dark map; layout.tsx sets data-theme before first paint from the same key
   const [theme, setTheme] = useState<MapTheme>('dark');
@@ -624,6 +626,25 @@ export default function HomePage() {
       cancelled = true;
     };
   }, [dossierMmsi, dossierImo, apiBase]);
+
+  // Fallback "last seen" from Global Fishing Watch for research ships
+  useEffect(() => {
+    setGfwLastSeen(null);
+    if (!dossierMmsi || !isRussianResearchVessel(dossierMmsi)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${apiBase}/api/gfw/vessel-last-seen?mmsi=${dossierMmsi}`, { cache: 'no-store' });
+        const j = await r.json();
+        if (!cancelled) setGfwLastSeen(j);
+      } catch {
+        if (!cancelled) setGfwLastSeen({ error: 'unreachable' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dossierMmsi, apiBase]);
 
   const anyGfw =
     gfw.loitering ||
@@ -1242,6 +1263,7 @@ export default function HomePage() {
                 vessel={selectedVessel}
                 trackSpoofing={track?.mmsi === selectedVessel.mmsi ? track.spoofing : undefined}
                 sanctions={sanctionsInfo}
+                gfwLastSeen={gfwLastSeen}
                 note={watchlist.notes[selectedVessel.mmsi] || ''}
                 onNoteChange={(text) =>
                   setWatchlist((s) => setVesselNote(s, selectedVessel.mmsi, text))
