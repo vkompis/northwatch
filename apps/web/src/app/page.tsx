@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type {
   OverlayVisibility,
@@ -44,8 +44,30 @@ import {
   vesselFiltersFromUrlTokens,
   resolveShipClass,
   vesselPassesFilter,
+  VESSEL_FILTER_PRESETS,
+  sameFilters,
+  type MapTheme,
 } from '@svalmap/ui';
 import VesselFilterPanel from './VesselFilterPanel';
+import MapMenu, { MENU_ICONS, type MapMenuId, type MapMenuItem } from './MapMenu';
+import type { MapView } from './MapViewReporter';
+
+/** Copernicus Browser on Sentinel-2 true colour over the current map view (its own default date: latest). */
+function copernicusAreaUrl(view: MapView | null): string {
+  const params = new URLSearchParams({
+    themeId: 'DEFAULT-THEME',
+    datasetId: 'S2_L2A_CDAS',
+    layerId: '1_TRUE_COLOR',
+    cloudCoverage: '30',
+  });
+  if (view) {
+    // Copernicus shows little below z7; zoom out no further than that
+    params.set('zoom', String(Math.max(7, Math.min(14, Math.round(view.zoom)))));
+    params.set('lat', view.lat.toFixed(5));
+    params.set('lng', view.lon.toFixed(5));
+  }
+  return `https://browser.dataspace.copernicus.eu/?${params}`;
+}
 import LayerRow, { DotMarker, LineMarker, RingMarker } from './LayerRow';
 import VesselDossier from './VesselDossier';
 import VesselTimeline from './VesselTimeline';
@@ -62,6 +84,11 @@ const DEFAULT_OVERLAYS: OverlayVisibility = {
   'cables-telegeography': false,
   pipelines: false,
   'pipelines-old': false,
+  'power-cables': false,
+  'chart-cables': false,
+  'chart-pipelines': false,
+  'chart-spans': false,
+  'chart-aquaculture': false,
   petroleum: false,
   bathymetry: false,
   'seabed-relief': false,
@@ -120,7 +147,7 @@ function formatWhen(iso: string | null | undefined) {
 }
 
 export default function HomePage() {
-  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [menuOpen, setMenuOpen] = useState<MapMenuId | null>(null);
   const [coverageOpen, setCoverageOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
@@ -144,6 +171,8 @@ export default function HomePage() {
   const [alertsExpanded, setAlertsExpanded] = useState(false);
   const [vesselFilters, setVesselFilters] = useState<VesselFilterFlags>(DEFAULT_VESSEL_FILTERS);
   const [trackDays, setTrackDays] = useState(1);
+  /** The ship the dossier was last opened for; a different one starts on 24 h again */
+  const openedMmsiRef = useRef<string | null>(null);
   const [track, setTrack] = useState<VesselTrack | null>(null);
   const [scrub, setScrub] = useState<VesselScrub | null>(null);
   const [navData, setNavData] = useState<{ onMap: number; notices: NavWarningProps[] } | null>(null);
@@ -153,6 +182,10 @@ export default function HomePage() {
   const [healthMeta, setHealthMeta] = useState<any>(null);
   const [sanctionsInfo, setSanctionsInfo] = useState<any>(null);
   const [shareHint, setShareHint] = useState<string | null>(null);
+  // Light / dark map; layout.tsx sets data-theme before first paint from the same key
+  const [theme, setTheme] = useState<MapTheme>('dark');
+  /** Where the map is — for "satellite images of this area" */
+  const [mapView, setMapView] = useState<MapView | null>(null);
   const [pendingMmsi, setPendingMmsi] = useState<string | null>(null);
 
   const mapStyle =
@@ -226,7 +259,6 @@ export default function HomePage() {
           });
         }
         if (typeof p.shipsVisible === 'boolean') setShipsVisible(p.shipsVisible);
-        if (typeof p.drawerOpen === 'boolean') setDrawerOpen(p.drawerOpen);
         if (p.vesselFilters) setVesselFilters(mergeVesselFilters(p.vesselFilters));
         if (typeof p.trackDays === 'number') setTrackDays(Math.max(1, Math.min(14, p.trackDays)));
         if (typeof p.showIncidents === 'boolean') setShowIncidents(p.showIncidents);
@@ -273,7 +305,6 @@ export default function HomePage() {
           overlays,
           gfw,
           shipsVisible,
-          drawerOpen,
           vesselFilters,
           trackDays,
           showIncidents,
@@ -282,7 +313,25 @@ export default function HomePage() {
     } catch {
       /* ignore */
     }
-  }, [overlays, gfw, shipsVisible, drawerOpen, vesselFilters, trackDays, showIncidents, prefsReady]);
+  }, [overlays, gfw, shipsVisible, vesselFilters, trackDays, showIncidents, prefsReady]);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('svalmap.theme') === 'light') setTheme('light');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!prefsReady) return;
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('svalmap.theme', theme);
+    } catch {
+      /* ignore */
+    }
+  }, [theme, prefsReady]);
 
   useEffect(() => {
     // Until the stored list is loaded, `watchlist` is the empty initial state; saving it would
@@ -336,6 +385,7 @@ export default function HomePage() {
   };
 
   const closeDetail = useCallback(() => {
+    openedMmsiRef.current = null;
     setDetailDrawerOpen(false);
     setSelection(null);
     setPendingMmsi(null);
@@ -373,12 +423,19 @@ export default function HomePage() {
     setAlertsExpanded(false);
   };
 
+  // Each ship you open starts on the last 24 h; a longer range only sticks while you stay on it
+  const startOnLastDay = useCallback((mmsi: string) => {
+    if (openedMmsiRef.current !== mmsi) setTrackDays(1);
+    openedMmsiRef.current = mmsi;
+  }, []);
+
   const openVessel = useCallback((vessel: VesselFeatureProps) => {
+    startOnLastDay(vessel.mmsi);
     setSelection({ kind: 'vessel', vessel });
     setDetailDrawerOpen(true);
     setAlertsExpanded(false);
     setPendingMmsi(null);
-  }, []);
+  }, [startOnLastDay]);
 
   /**
    * Open a vessel by MMSI from anywhere (search, watchlist, GFW, incidents).
@@ -426,6 +483,7 @@ export default function HomePage() {
         ? 'research'
         : mmsiCategory(id, shipType, imo, opts?.military);
       // Keep pending so the stub upgrades when the vessel appears live
+      startOnLastDay(id);
       setPendingMmsi(id);
       setSelection({
         kind: 'vessel',
@@ -460,7 +518,7 @@ export default function HomePage() {
       setDetailDrawerOpen(true);
       setAlertsExpanded(false);
     },
-    [liveVessels, openVessel]
+    [liveVessels, openVessel, startOnLastDay]
   );
 
   const selectedMmsi =
@@ -525,18 +583,15 @@ export default function HomePage() {
               top: 56,
               right: detailDrawerOpen ? 380 : 0,
               bottom: 146,
-              left: drawerOpen ? 300 : 0,
+              left: 0,
             },
           }
         : null,
-    [selVessel, scrub, detailDrawerOpen, drawerOpen]
+    [selVessel, scrub, detailDrawerOpen]
   );
 
   // A clicked warning opens the detail card on the right; fit its shape beside it
-  const warningPadding = useMemo(
-    () => ({ top: 56, right: 380, bottom: 40, left: drawerOpen ? 300 : 0 }),
-    [drawerOpen]
-  );
+  const warningPadding = useMemo(() => ({ top: 56, right: 380, bottom: 40, left: 0 }), []);
 
   const dossierMmsi = selection?.kind === 'vessel' ? selection.vessel.mmsi : null;
   const dossierImo = selection?.kind === 'vessel' ? selection.vessel.imo : null;
@@ -598,89 +653,22 @@ export default function HomePage() {
     return parts.join(' · ');
   }, [healthMeta]);
 
-  return (
-    <div
-      className={`relative w-full h-screen overflow-hidden ${drawerOpen ? 'layers-open' : ''} ${
-        selVessel ? 'has-timeline' : ''
-      }`}
-    >
-      <header className="app-chrome" aria-label="SvalMap status">
-        <div className="brand">SvalMap</div>
-        <VesselSearch
-          apiBase={apiBase}
-          onSelect={(hit) =>
-            openVesselByMmsi(hit.mmsi, {
-              name: hit.vessel_name || hit.name,
-              imo: hit.imo,
-              shipType: hit.shipType,
-              sanctioned: hit.sanctioned,
-              shadowfleet: hit.shadowfleet,
-              sanctionedMaster: hit.sanctionedMaster,
-              military: hit.military,
-              research: hit.research,
-              lon: hit.lon,
-              lat: hit.lat,
-              speed: hit.speed,
-              course: hit.course,
-              heading: hit.heading,
-              status: hit.status,
-              destination: hit.destination,
-              eta: hit.eta,
-              timestamp: hit.timestamp,
-            })
-          }
-          onOpenMmsi={(mmsi) => openVesselByMmsi(mmsi)}
-        />
-        <div className="chrome-meta">
-          <span
-            className={`status-dot ${apiOk === false ? 'bad' : apiOk ? 'ok' : ''}`}
-            title={apiOk === false ? 'API unreachable' : 'API ok'}
-          />
-          <span className="chrome-status">{statusLabel}</span>
-          {freshnessHint && <span className="chrome-hint">{freshnessHint}</span>}
-          {aisStatus.trackStatus === 'loading' && (
-            <span className="chrome-hint">Loading {trackDays}d track…</span>
-          )}
-          {aisStatus.trackStatus === 'error' && aisStatus.trackError && (
-            <span className="chrome-hint warn">{aisStatus.trackError}</span>
-          )}
-          <button
-            type="button"
-            className="chrome-btn"
-            onClick={() => {
-              copyShareUrl()
-                .then(() => {
-                  setShareHint('Link copied');
-                  setTimeout(() => setShareHint(null), 2000);
-                })
-                .catch(() => setShareHint('Copy failed'));
-            }}
-          >
-            {shareHint || 'Share'}
-          </button>
-        </div>
-      </header>
-
-      <div className={`drawer ${drawerOpen ? 'open' : ''}`}>
-        <div className="panel" role="navigation" aria-label="Map layers">
-          <div className="panel-head">
-            <span className="panel-brand">SvalMap</span>
-            <button
-              id="collapse-btn"
-              type="button"
-              onClick={() => setDrawerOpen(false)}
-              title="Collapse layers"
-              aria-label="Collapse layers"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M15 6l-6 6 6 6" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="section">
-            <h2 className="panel-h">Vessels</h2>
-            <p className="panel-lede">What the map shows, and why.</p>
+  // Badges: what each group is doing right now, readable without opening it
+  const shipsPreset = VESSEL_FILTER_PRESETS.find((p) => sameFilters(vesselFilters, p.filters));
+  const PRESET_BADGE: Record<string, string> = { interest: 'Interest', sanctions: 'Sanctions', watchlist: 'Watchlist' };
+  const activeCount = (flags: unknown[]) => flags.filter(Boolean).length;
+  const navOn = overlays.navwarnings || overlays['navwarnings-30d'];
+  const menuItems: MapMenuItem[] = [
+    {
+      id: 'ships',
+      label: 'Ships',
+      icon: MENU_ICONS.ships,
+      badge: !shipsVisible ? 'Off' : shipsPreset ? PRESET_BADGE[shipsPreset.id] || null : 'Filtered',
+      tone: 'accent',
+      title: 'Ships',
+      lede: 'What the map shows, and why.',
+      content: (
+        <>
             <LayerRow
               label="Live ships"
               sub="AISStream + BarentsWatch · every 20 s"
@@ -726,11 +714,39 @@ export default function HomePage() {
               Export visible ships (GeoJSON)
             </button>
 
-            <h2 className="panel-h">Activity</h2>
-            <p className="panel-lede">Behaviour worth a second look.</p>
+            <button
+              type="button"
+              className={`disclaimer-toggle ${coverageOpen ? 'open' : ''}`}
+              onClick={() => setCoverageOpen((v) => !v)}
+              aria-expanded={coverageOpen}
+            >
+              Data coverage
+            </button>
+            {coverageOpen && (
+              <div className="disclaimer">
+                Inside Norway EEZ, Jan Mayen EEZ, and the Svalbard Fisheries Protection Zone: all
+                registered vessels except fishing under 15&nbsp;m and recreational under 45&nbsp;m
+                (when length is known). Elsewhere in the North Atlantic north of 54°N: Russian
+                vessels, curated research vessels, shadow fleet, sanctioned vessels, and military /
+                law enforcement. Live AIS via AISStream + BarentsWatch (~20&nbsp;s refresh). Fishing-gear
+                buoys and other AIS beacons are hidden by default (Ship filters → Ship type).
+              </div>
+            )}
+        </>
+      ),
+    },
+    {
+      id: 'activity',
+      label: 'Activity',
+      icon: MENU_ICONS.activity,
+      badge: activeCount([showIncidents, gfw.aisoff, gfw.loitering, gfw.encounters, gfw.port, gfw.sarUnmatched, gfw.sarMatched]),
+      title: 'Activity',
+      lede: 'Behaviour worth a second look.',
+      content: (
+        <>
             <LayerRow
-              label="Stopped or meeting at sea"
-              sub="Live AIS · RU, sanctioned, shadow, research"
+              label="Stopped, meeting or over cables"
+              sub="Live AIS · ships of interest; any ship lingering over cables or pipelines"
               marker={<RingMarker color="#F0704A" />}
               checked={showIncidents}
               onChange={setShowIncidents}
@@ -783,48 +799,64 @@ export default function HomePage() {
               onChange={(on) => setGfwFlag('sarMatched', on)}
             />
             {gfw.sarMatched && (
-              <div className="item sar-flag-filter">
-                <div className="sar-flag-filter-head">
-                  Flag filter
-                  <span className="sar-flag-filter-hint">
+              <div className="flag-filter" role="group" aria-label="Flags of radar-matched vessels">
+                <div className="panel-kicker flag-filter-head">
+                  <span>
+                    Flag ·{' '}
                     {gfw.sarMatchedFlags.length === 0
-                      ? 'All countries'
-                      : `${gfw.sarMatchedFlags.length} selected`}
+                      ? 'all countries'
+                      : `${gfw.sarMatchedFlags.length} of ${SAR_MATCHED_FLAG_OPTIONS.length}`}
                   </span>
+                  {gfw.sarMatchedFlags.length > 0 && (
+                    <button
+                      type="button"
+                      className="flag-filter-clear"
+                      onClick={() => setGfw((prev) => ({ ...prev, sarMatchedFlags: [] }))}
+                    >
+                      Show all
+                    </button>
+                  )}
                 </div>
-                <div className="sar-flag-grid">
+                <div className="flag-filter-list">
                   {SAR_MATCHED_FLAG_OPTIONS.map((opt) => {
                     const on = gfw.sarMatchedFlags.includes(opt.code);
                     return (
-                      <label key={opt.code} className={`sar-flag-chip ${on ? 'on' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={() => toggleSarMatchedFlag(opt.code)}
-                        />
-                        <span className="sar-flag-code">{opt.code}</span>
-                        <span className="sar-flag-label">{opt.label}</span>
+                      <label key={opt.code} className={`flag-option ${on ? 'on' : ''}`} title={opt.code}>
+                        <input type="checkbox" checked={on} onChange={() => toggleSarMatchedFlag(opt.code)} />
+                        {/* Tick first, so in two columns it never reads as the next country's */}
+                        <svg className="flag-option-tick" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M5 12.5l4.5 4.5L19 7.5" />
+                        </svg>
+                        <img src={`/flag-icons/${opt.iso2}.svg`} alt="" width={16} height={11} />
+                        <span>{opt.label}</span>
                       </label>
                     );
                   })}
                 </div>
-                {gfw.sarMatchedFlags.length > 0 && (
-                  <button
-                    type="button"
-                    className="sar-flag-clear"
-                    onClick={() => setGfw((prev) => ({ ...prev, sarMatchedFlags: [] }))}
-                  >
-                    Clear flag filter
-                  </button>
-                )}
               </div>
             )}
             <p className="panel-note">
               Fishing Watch events cover Russian, sanctioned and shadow-fleet vessels; radar covers
               the Norwegian zones.
             </p>
-
-            <h2 className="panel-h">Sea &amp; seabed</h2>
+        </>
+      ),
+    },
+    {
+      id: 'sea',
+      label: 'Sea & seabed',
+      icon: MENU_ICONS.sea,
+      badge: activeCount([
+        overlays['seabed-relief'],
+        overlays.bathymetry,
+        overlays['eez-svalbard'],
+        overlays['eez-norway'],
+        overlays['eez-janmayen'],
+        overlays['ice-edge'],
+      ]),
+      title: 'Sea & seabed',
+      content: (
+        <>
             <LayerRow
               label="Seabed relief"
               sub="Kartverket 50–5 m · AWS terrain elsewhere"
@@ -863,8 +895,41 @@ export default function HomePage() {
               checked={overlays['ice-edge']}
               onChange={(on) => setOverlay('ice-edge', on)}
             />
-
-            <h2 className="panel-h">Infrastructure</h2>
+            <a
+              className="panel-link"
+              href={copernicusAreaUrl(mapView)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Satellite images of this area (Copernicus) ↗
+            </a>
+            <p className="panel-note">
+              Opens Sentinel-2 where the map is now, most recent images first. In the polar night
+              or under cloud, switch to Sentinel-1 radar there.
+            </p>
+        </>
+      ),
+    },
+    {
+      id: 'infra',
+      label: 'Infrastructure',
+      icon: MENU_ICONS.infra,
+      badge: activeCount([
+        overlays.cables,
+        overlays['cables-telegeography'],
+        overlays.pipelines,
+        overlays['pipelines-old'],
+        overlays['power-cables'],
+        overlays.petroleum,
+        overlays.ports,
+        overlays['chart-cables'],
+        overlays['chart-pipelines'],
+        overlays['chart-spans'],
+        overlays['chart-aquaculture'],
+      ]),
+      title: 'Infrastructure',
+      content: (
+        <>
             <LayerRow
               label="Subsea cables"
               sub="Nkom"
@@ -878,6 +943,13 @@ export default function HomePage() {
               marker={<LineMarker color="#f472b6" />}
               checked={overlays['cables-telegeography']}
               onChange={(on) => setOverlay('cables-telegeography', on)}
+            />
+            <LayerRow
+              label="Power cables"
+              sub="NVE · high voltage in the sea, with owner"
+              marker={<LineMarker color="#a3e635" />}
+              checked={overlays['power-cables']}
+              onChange={(on) => setOverlay('power-cables', on)}
             />
             <LayerRow
               label="Pipelines"
@@ -906,8 +978,48 @@ export default function HomePage() {
               checked={overlays.ports}
               onChange={(on) => setOverlay('ports', on)}
             />
-
-            <h2 className="panel-h">Restrictions &amp; warnings</h2>
+            <div className="panel-kicker">From the sea charts · zoom in to see them</div>
+            <LayerRow
+              label="Cables"
+              sub="Kartverket · from zoom 12"
+              marker={<LineMarker color="#9ca3af" />}
+              checked={overlays['chart-cables']}
+              onChange={(on) => setOverlay('chart-cables', on)}
+            />
+            <LayerRow
+              label="Pipelines"
+              sub="Kartverket · from zoom 8"
+              marker={<LineMarker color="#f43f5e" />}
+              checked={overlays['chart-pipelines']}
+              onChange={(on) => setOverlay('chart-pipelines', on)}
+            />
+            <LayerRow
+              label="Overhead spans & bridges"
+              sub="Kartverket · with sailing clearance"
+              marker={<LineMarker color="#cbd5e1" dashed />}
+              checked={overlays['chart-spans']}
+              onChange={(on) => setOverlay('chart-spans', on)}
+            />
+            <LayerRow
+              label="Aquaculture & moorings"
+              sub="Kartverket · fish farms and mooring cables"
+              marker={<LineMarker color="#818cf8" />}
+              checked={overlays['chart-aquaculture']}
+              onChange={(on) => setOverlay('chart-aquaculture', on)}
+            />
+        </>
+      ),
+    },
+    {
+      id: 'warnings',
+      label: 'Warnings',
+      icon: MENU_ICONS.warnings,
+      // In force right now when navigation warnings are on; otherwise how many layers are on
+      badge: navOn && navData ? navData.onMap + navData.notices.length : activeCount([overlays.nsm, overlays.skytefelt]),
+      tone: navOn && navData ? 'alert' : undefined,
+      title: 'Restrictions & warnings',
+      content: (
+        <>
             <LayerRow
               label="NSM restrictions"
               checked={overlays.nsm}
@@ -947,41 +1059,92 @@ export default function HomePage() {
                 ))}
               </div>
             )}
+        </>
+      ),
+    },
+  ];
 
-            <button
-              type="button"
-              className={`disclaimer-toggle ${coverageOpen ? 'open' : ''}`}
-              onClick={() => setCoverageOpen((v) => !v)}
-              aria-expanded={coverageOpen}
-            >
-              Data coverage
-            </button>
-            {coverageOpen && (
-              <div className="disclaimer">
-                Inside Norway EEZ, Jan Mayen EEZ, and the Svalbard Fisheries Protection Zone: all
-                registered vessels except fishing under 15&nbsp;m and recreational under 45&nbsp;m
-                (when length is known). Elsewhere in the North Atlantic north of 54°N: Russian
-                vessels, curated research vessels, shadow fleet, sanctioned vessels, and military /
-                law enforcement. Live AIS via AISStream + BarentsWatch (~20&nbsp;s refresh). Fishing-gear
-                buoys and other AIS beacons are hidden by default (Ship filters → Ship type).
-              </div>
+  return (
+    <div
+      className={`relative w-full h-screen overflow-hidden ${selVessel ? 'has-timeline' : ''} ${
+        detailDrawerOpen ? 'detail-open' : ''
+      }`}
+    >
+      <header className="app-chrome" aria-label="NorthWatch status">
+        <div className="brand">NorthWatch</div>
+        <VesselSearch
+          apiBase={apiBase}
+          onSelect={(hit) =>
+            openVesselByMmsi(hit.mmsi, {
+              name: hit.vessel_name || hit.name,
+              imo: hit.imo,
+              shipType: hit.shipType,
+              sanctioned: hit.sanctioned,
+              shadowfleet: hit.shadowfleet,
+              sanctionedMaster: hit.sanctionedMaster,
+              military: hit.military,
+              research: hit.research,
+              lon: hit.lon,
+              lat: hit.lat,
+              speed: hit.speed,
+              course: hit.course,
+              heading: hit.heading,
+              status: hit.status,
+              destination: hit.destination,
+              eta: hit.eta,
+              timestamp: hit.timestamp,
+            })
+          }
+          onOpenMmsi={(mmsi) => openVesselByMmsi(mmsi)}
+        />
+        <MapMenu items={menuItems} open={menuOpen} onOpenChange={setMenuOpen} />
+        <div className="chrome-meta">
+          <span
+            className={`status-dot ${apiOk === false ? 'bad' : apiOk ? 'ok' : ''}`}
+            title={apiOk === false ? 'API unreachable' : 'API ok'}
+          />
+          <span className="chrome-status">{statusLabel}</span>
+          {freshnessHint && <span className="chrome-hint">{freshnessHint}</span>}
+          {aisStatus.trackStatus === 'loading' && (
+            <span className="chrome-hint">Loading {trackDays}d track…</span>
+          )}
+          {aisStatus.trackStatus === 'error' && aisStatus.trackError && (
+            <span className="chrome-hint warn">{aisStatus.trackError}</span>
+          )}
+          <button
+            type="button"
+            className="chrome-btn theme-toggle"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            aria-label={theme === 'dark' ? 'Switch to light map' : 'Switch to dark map'}
+            title={theme === 'dark' ? 'Light map' : 'Dark map'}
+          >
+            {theme === 'dark' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />
+              </svg>
             )}
-          </div>
+          </button>
+          <button
+            type="button"
+            className="chrome-btn"
+            onClick={() => {
+              copyShareUrl()
+                .then(() => {
+                  setShareHint('Link copied');
+                  setTimeout(() => setShareHint(null), 2000);
+                })
+                .catch(() => setShareHint('Copy failed'));
+            }}
+          >
+            {shareHint || 'Share'}
+          </button>
         </div>
-        <div className="overlay" onClick={() => setDrawerOpen(false)} />
-      </div>
-
-      {!drawerOpen && (
-        <button
-          type="button"
-          className="layers-fab"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open map layers"
-          title="Map layers"
-        >
-          Layers
-        </button>
-      )}
+      </header>
 
       <div className="map-stage">
         <MapCanvas
@@ -1021,6 +1184,8 @@ export default function HomePage() {
           onNavWarningsData={setNavData}
           scrub={mapScrub}
           warningPadding={warningPadding}
+          theme={theme}
+          onViewChange={setMapView}
         />
       </div>
 
@@ -1034,7 +1199,7 @@ export default function HomePage() {
           track={track}
           loading={aisStatus.trackStatus === 'loading'}
           onScrub={setScrub}
-          className={`${drawerOpen ? 'left-open' : ''} ${detailDrawerOpen ? 'right-open' : ''}`}
+          className={detailDrawerOpen ? 'right-open' : ''}
         />
       )}
 
@@ -1194,11 +1359,22 @@ export default function HomePage() {
                       </span>
                     </div>
                   )}
-                  {ev.intentionalDisabling != null && (
-                    <div className="row">
-                      <span className="k">Intentional gap:</span>
-                      <span className="v">{ev.intentionalDisabling ? 'Likely yes' : 'No / unknown'}</span>
-                    </div>
+                  {(ev.subtype === 'ais_off' || ev.intentionalDisabling != null) && (
+                    <>
+                      {/* GFW's API only returns gaps that pass its disabling filter, so every one is flagged */}
+                      <div className="row">
+                        <span className="k">Assessment:</span>
+                        <span className="v">Possible intentional AIS disabling — Global Fishing Watch's flag</span>
+                      </div>
+                      <div className="row muted" style={{ display: 'block', lineHeight: 1.45 }}>
+                        GFW counts a gap only when it lasts at least 12 hours, starts at least 50 nm from
+                        shore in an area with good satellite reception (over 10 positions a day), and the
+                        vessel sent at least 14 satellite positions in the 12 hours before. It is a pattern,
+                        not proof: GFW calls the dataset a prototype, and its reception map is from
+                        2017–2019. Gaps closer to the coast are left out, so most Norwegian coastal gaps
+                        never show here.
+                      </div>
+                    </>
                   )}
                   {ev.note && (
                     <div className="row muted">{ev.note}</div>
@@ -1282,16 +1458,17 @@ export default function HomePage() {
               <>
                 <div
                   className="head"
-                  data-kicker={c.kind === 'landing' ? 'Cable landing' : 'Subsea cable'}
+                  data-kicker={c.kind === 'landing' ? 'Cable landing' : c.kind === 'power' ? 'Power cable' : 'Subsea cable'}
                   style={
                     {
-                      ['--kind' as string]: c.color || (c.kind === 'nkom' ? '#0891b2' : '#db2777'),
+                      ['--kind' as string]:
+                        c.color || (c.kind === 'nkom' ? '#0891b2' : c.kind === 'power' ? '#84cc16' : '#db2777'),
                     } as React.CSSProperties
                   }
                 >
                   {c.name}
                   <div className="country" style={{ marginTop: 6 }}>
-                    {c.kind === 'landing' ? 'Landing point' : 'Submarine cable'}
+                    {c.kind === 'landing' ? 'Landing point' : c.kind === 'power' ? 'High-voltage sea cable' : 'Submarine cable'}
                   </div>
                 </div>
                 <div className="body">
@@ -1309,6 +1486,20 @@ export default function HomePage() {
                       <span className="v">{c.kabeltype}</span>
                     </div>
                   )}
+                  {c.kind === 'power' &&
+                    ([
+                      ['Owner:', c.owner],
+                      ['Grid:', c.netLevel],
+                      ['Voltage:', c.voltageKv != null ? `${c.voltageKv} kV` : null],
+                      ['In service since:', c.year != null ? String(c.year) : null],
+                    ] as [string, string | null | undefined][])
+                      .filter(([, v]) => v)
+                      .map(([k, v]) => (
+                        <div className="row" key={k}>
+                          <span className="k">{k}</span>
+                          <span className="v">{v}</span>
+                        </div>
+                      ))}
                   {c.rfs_year != null && (
                     <div className="row">
                       <span className="k">RFS year:</span>

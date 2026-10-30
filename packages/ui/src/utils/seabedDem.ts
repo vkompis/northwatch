@@ -1,6 +1,6 @@
 import maplibregl from 'maplibre-gl';
 import { flattenLand } from './terrarium';
-import { RELIEF_COLOURS, reliefGain, tileBbox3857, tintKartverketRelief, type Rgb } from './kartverketRelief';
+import { reliefColours, reliefGain, tileBbox3857, tintKartverketRelief, type MapTheme } from './kartverketRelief';
 
 /**
  * Seabed-only DEM: AWS terrarium tiles with every land pixel flattened to 0 m, so a
@@ -50,18 +50,15 @@ export function registerSeabedProtocol(): void {
 /** Kartverket seabed hillshade, recoloured to the DEM relief's colours (see kartverketRelief.ts). */
 const KV_RELIEF_WMS = 'https://wms.geonorge.no/skwms1/wms.havbunnraster3';
 const KV_PROTOCOL = 'kvrelief';
-export const KV_RELIEF_TILES = `${KV_PROTOCOL}://{z}/{x}/{y}`;
+/** The theme is part of the tile URL, so switching it fetches tiles in the other colours. */
+export const kartverketReliefTiles = (theme: MapTheme) => `${KV_PROTOCOL}://${theme}/{z}/{x}/{y}`;
 
 let kvRegistered = false;
-let kvColours = RELIEF_COLOURS;
-
-/** Match the basemap's water fill; tiles drawn after this use it. */
-export function setKartverketReliefWater(water: Rgb | null): void {
-  if (water) kvColours = { ...RELIEF_COLOURS, water };
-}
 
 async function loadKartverketReliefTile(path: string, signal: AbortSignal): Promise<ArrayBuffer> {
-  const [z, x, y] = path.split('/').map(Number);
+  const [themePart, ...xyz] = path.split('/');
+  const theme: MapTheme = themePart === 'light' ? 'light' : 'dark';
+  const [z, x, y] = xyz.map(Number);
   // 512 px for a 256 px tile: crisp on high-density screens
   const url =
     `${KV_RELIEF_WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=bare_skygge&STYLES=` +
@@ -76,7 +73,7 @@ async function loadKartverketReliefTile(path: string, signal: AbortSignal): Prom
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  tintKartverketRelief(image.data, kvColours, reliefGain(z));
+  tintKartverketRelief(image.data, reliefColours(theme), reliefGain(z));
   ctx.putImageData(image, 0, 0);
   return (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer();
 }

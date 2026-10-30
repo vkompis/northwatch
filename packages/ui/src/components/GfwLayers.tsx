@@ -21,22 +21,23 @@ export type GfwVisibility = {
 };
 
 /** Common flags in the Barents / Svalbard SAR AOI. */
-export const SAR_MATCHED_FLAG_OPTIONS: { code: string; label: string }[] = [
-  { code: 'RUS', label: 'Russia' },
-  { code: 'NOR', label: 'Norway' },
-  { code: 'ISL', label: 'Iceland' },
-  { code: 'DNK', label: 'Denmark' },
-  { code: 'FRO', label: 'Faroe' },
-  { code: 'GBR', label: 'UK' },
-  { code: 'CHN', label: 'China' },
-  { code: 'DEU', label: 'Germany' },
-  { code: 'NLD', label: 'Netherlands' },
-  { code: 'POL', label: 'Poland' },
-  { code: 'ESP', label: 'Spain' },
-  { code: 'FRA', label: 'France' },
-  { code: 'PAN', label: 'Panama' },
-  { code: 'LBR', label: 'Liberia' },
-  { code: 'MHL', label: 'Marshall Is.' },
+/** `iso2` names the flag icon (public/flag-icons). */
+export const SAR_MATCHED_FLAG_OPTIONS: { code: string; iso2: string; label: string }[] = [
+  { code: 'RUS', iso2: 'ru', label: 'Russia' },
+  { code: 'NOR', iso2: 'no', label: 'Norway' },
+  { code: 'ISL', iso2: 'is', label: 'Iceland' },
+  { code: 'DNK', iso2: 'dk', label: 'Denmark' },
+  { code: 'FRO', iso2: 'fo', label: 'Faroe' },
+  { code: 'GBR', iso2: 'gb', label: 'UK' },
+  { code: 'CHN', iso2: 'cn', label: 'China' },
+  { code: 'DEU', iso2: 'de', label: 'Germany' },
+  { code: 'NLD', iso2: 'nl', label: 'Netherlands' },
+  { code: 'POL', iso2: 'pl', label: 'Poland' },
+  { code: 'ESP', iso2: 'es', label: 'Spain' },
+  { code: 'FRA', iso2: 'fr', label: 'France' },
+  { code: 'PAN', iso2: 'pa', label: 'Panama' },
+  { code: 'LBR', iso2: 'lr', label: 'Liberia' },
+  { code: 'MHL', iso2: 'mh', label: 'Marshall Is.' },
 ];
 
 export type GfwEventProps = {

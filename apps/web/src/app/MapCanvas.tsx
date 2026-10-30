@@ -4,12 +4,14 @@ import {
   MapContainer,
   VesselLayer,
   OverlayLayers,
+  BasemapTheme,
   GfwLayers,
   IncidentLayer,
   AoiDrawLayer,
   type OverlayVisibility,
   type GfwVisibility,
   type VesselFeatureProps,
+  type MapTheme,
   type GfwEventProps,
   type VesselLayerStatus,
   type VesselTrack,
@@ -22,6 +24,7 @@ import {
   type AlertPolygon,
   type VesselFilterFlags,
 } from '@svalmap/ui';
+import MapViewReporter, { type MapView } from './MapViewReporter';
 
 type Props = {
   mapStyle: string;
@@ -56,6 +59,10 @@ type Props = {
   scrub?: VesselScrub | null;
   /** Panels over the map, kept clear when fitting to a clicked warning. */
   warningPadding?: { top: number; right: number; bottom: number; left: number };
+  /** Light or dark basemap, switched in place */
+  theme?: MapTheme;
+  /** Map centre and zoom after each move */
+  onViewChange?: (view: MapView) => void;
 };
 
 export default function MapCanvas({
@@ -90,6 +97,8 @@ export default function MapCanvas({
   onNavWarningsData,
   scrub = null,
   warningPadding,
+  theme = 'dark',
+  onViewChange,
 }: Props) {
   return (
     <MapContainer
@@ -100,18 +109,22 @@ export default function MapCanvas({
       attribution={attribution}
       maptilerKey={maptilerKey}
     >
+      <BasemapTheme theme={theme} />
+      {onViewChange && <MapViewReporter onChange={onViewChange} />}
       <OverlayLayers
         visibility={overlays}
         onCableSelect={onCableSelect}
         onPortSelect={onPortSelect}
         onRigSelect={onRigSelect}
         onPipelineSelect={onPipelineSelect}
+        theme={theme}
       />
       <IncidentLayer
         // The feed only has in-force warnings, so "last 30 days" was the same set — one toggle
         showActive={overlays.navwarnings || overlays['navwarnings-30d']}
         onData={onNavWarningsData}
         fitPadding={warningPadding}
+        theme={theme}
         interactive={!drawingAoi}
         onWarningSelect={drawingAoi ? undefined : onNavWarningSelect}
       />
@@ -129,6 +142,7 @@ export default function MapCanvas({
         onVesselsChange={onVesselsChange}
         onTrack={onTrack}
         scrub={scrub}
+        theme={theme}
       />
       <GfwLayers
         visibility={gfw}

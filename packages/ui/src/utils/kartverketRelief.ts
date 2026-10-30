@@ -16,6 +16,8 @@ export type ReliefColours = {
   highlightAlpha: number;
 };
 
+export type MapTheme = 'dark' | 'light';
+
 /** Same as the DEM relief's hillshade paint, over the basemap's water-fill. */
 export const RELIEF_COLOURS: ReliefColours = {
   water: [6, 22, 41],
@@ -24,6 +26,18 @@ export const RELIEF_COLOURS: ReliefColours = {
   highlight: [120, 160, 200],
   highlightAlpha: 0.35,
 };
+
+/** Light map: soft blue-grey shadows and white light over the near-white sea. */
+export const RELIEF_COLOURS_LIGHT: ReliefColours = {
+  water: [245, 247, 248],
+  shadow: [60, 80, 100],
+  shadowAlpha: 0.4,
+  highlight: [255, 255, 255],
+  highlightAlpha: 0.55,
+};
+
+export const reliefColours = (theme: MapTheme): ReliefColours =>
+  theme === 'light' ? RELIEF_COLOURS_LIGHT : RELIEF_COLOURS;
 
 /** Kartverket's grey for level seabed, and the deviation that counts as full shade. */
 const FLAT = 180;
@@ -53,18 +67,6 @@ export function tintKartverketRelief(px: Uint8ClampedArray, colours: ReliefColou
     px[i + 1] = mix(water[1], toward[1], f);
     px[i + 2] = mix(water[2], toward[2], f);
   }
-}
-
-/** "#061629" / "rgb(6, 22, 41)" → [6, 22, 41]; null when it is an expression or unknown. */
-export function parseRgb(colour: unknown): Rgb | null {
-  if (typeof colour !== 'string') return null;
-  const hex = /^#([0-9a-f]{6})$/i.exec(colour.trim());
-  if (hex) {
-    const n = parseInt(hex[1], 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
-  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(colour.trim());
-  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null;
 }
 
 /** Web Mercator bounds of an XYZ tile, as WMS BBOX (minx,miny,maxx,maxy). */

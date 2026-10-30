@@ -42,6 +42,13 @@ type Props = {
   onData?: (data: { onMap: number; notices: NavWarningProps[] }) => void;
   /** Screen space covered by panels, kept clear when the map fits to a clicked warning. */
   fitPadding?: { top: number; right: number; bottom: number; left: number };
+  /** Basemap theme: warning labels in light red on the dark map, dark red on the light one */
+  theme?: 'dark' | 'light';
+};
+
+const LABEL_COLOURS = {
+  dark: { text: '#fecaca', halo: 'rgba(0,0,0,0.75)' },
+  light: { text: '#991b1b', halo: 'rgba(255,255,255,0.9)' },
 };
 
 const LAYER_IDS = [
@@ -111,6 +118,7 @@ export default function IncidentLayer({
   onWarningSelect,
   onData,
   fitPadding,
+  theme = 'dark',
 }: Props) {
   const map = useMap();
   const apiBase =
@@ -127,6 +135,8 @@ export default function IncidentLayer({
   onDataRef.current = onData;
   const fitPaddingRef = useRef(fitPadding);
   fitPaddingRef.current = fitPadding;
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   const applyVisibilityAndFilter = () => {
     if (!mapStyleReady(map)) return;
@@ -329,8 +339,8 @@ export default function IncidentLayer({
               'text-optional': true,
             },
             paint: {
-              'text-color': '#fecaca',
-              'text-halo-color': 'rgba(0,0,0,0.75)',
+              'text-color': LABEL_COLOURS[themeRef.current].text,
+              'text-halo-color': LABEL_COLOURS[themeRef.current].halo,
               'text-halo-width': 1.2,
               'text-opacity': 0.5,
             },
@@ -386,6 +396,12 @@ export default function IncidentLayer({
     applyVisibilityAndFilter();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, showActive, showRecent30d]);
+
+  useEffect(() => {
+    if (!mapStyleReady(map) || !safeGetLayer(map, 'nav-warnings-label')) return;
+    map.setPaintProperty('nav-warnings-label', 'text-color', LABEL_COLOURS[theme].text);
+    map.setPaintProperty('nav-warnings-label', 'text-halo-color', LABEL_COLOURS[theme].halo);
+  }, [map, theme]);
 
   return null;
 }

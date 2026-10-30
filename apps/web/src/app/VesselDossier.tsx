@@ -63,6 +63,33 @@ function ListingMarker({ kind }: { kind: Listing['kind'] }) {
 
 const externalLink = { target: '_blank', rel: 'noopener noreferrer' } as const;
 
+/**
+ * Copernicus Browser on Sentinel-2 true colour, at the ship's position on the day of its
+ * last fix — the place to start looking for an image of it. Sentinel-2 is optical: in the
+ * polar night and under cloud, switch the browser to Sentinel-1 radar.
+ */
+function copernicusUrl(v: VesselFeatureProps): string {
+  const base = 'https://browser.dataspace.copernicus.eu/';
+  const day = (v.timestamp && !Number.isNaN(Date.parse(v.timestamp)) ? new Date(v.timestamp) : new Date())
+    .toISOString()
+    .slice(0, 10);
+  const params = new URLSearchParams({
+    zoom: '12',
+    themeId: 'DEFAULT-THEME',
+    datasetId: 'S2_L2A_CDAS',
+    layerId: '1_TRUE_COLOR',
+    fromTime: `${day}T00:00:00.000Z`,
+    toTime: `${day}T23:59:59.999Z`,
+    dateMode: 'SINGLE',
+    cloudCoverage: '30',
+  });
+  if (v.lat != null && v.lon != null && Number.isFinite(v.lat) && Number.isFinite(v.lon)) {
+    params.set('lat', v.lat.toFixed(5));
+    params.set('lng', v.lon.toFixed(5));
+  }
+  return `${base}?${params}`;
+}
+
 /** Right-hand dossier for a selected vessel: identity, risk, live facts, reach, sources, note. */
 export default function VesselDossier({
   vessel: v,
@@ -95,12 +122,18 @@ export default function VesselDossier({
       : `Sanctioned · ${sanctionListings[0].programmes[0] || sanctionListings[0].title}`
     : 'Sanctioned · list match';
   const imoOk = !!v.imo && /^\d{7}$/.test(v.imo);
+  // Straight to the ship's own entry when it is listed; otherwise the list searched for it
+  const gurEntry = listings.find((l) => l.source === 'GUR' && l.url && l.kind !== 'master');
+  const gurUrl =
+    gurEntry?.url ||
+    `https://war-sanctions.gur.gov.ua/en/transport/ships?f%5Bsearch%5D=${encodeURIComponent(imoOk ? v.imo! : v.name || v.mmsi)}`;
   const lookups: [string, string][] = [
     ['VesselFinder', `https://www.vesselfinder.com/vessels/details/${imoOk ? v.imo : v.mmsi}`],
     ['MarineTraffic', `https://www.marinetraffic.com/en/ais/details/ships/${imoOk ? `imo:${v.imo}` : `mmsi:${v.mmsi}`}`],
-    ['OpenSanctions', sanctions?.opensanctionsUrl || `https://www.opensanctions.org/search/?q=${imoOk ? `IMO${v.imo}` : v.mmsi}`],
+    [listings.some((l) => l.source === 'OpenSanctions') ? 'OpenSanctions entry' : 'Search OpenSanctions', sanctions?.opensanctionsUrl || `https://www.opensanctions.org/search/?q=${imoOk ? `IMO${v.imo}` : v.mmsi}`],
     ['EU designated vessels (DMA)', sanctions?.euListUrl || 'https://www.dma.dk/growth-and-framework-conditions/maritime-sanctions/general-information/eu-vessel-designations'],
-    ['GUR War & Sanctions', sanctions?.gurListUrl || 'https://war-sanctions.gur.gov.ua/en/transport/ships'],
+    [gurEntry ? 'GUR entry' : 'Search GUR War & Sanctions', gurUrl],
+    ['Satellite images (Copernicus)', copernicusUrl(v)],
   ];
   const speed = num(v.speed);
   const course = num(v.course);

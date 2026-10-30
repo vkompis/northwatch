@@ -21,10 +21,11 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'SvalMap - Maritime Monitoring System',
-  description: 'Real-time maritime monitoring for Svalbard EEZ and Barents Sea',
-  keywords: 'maritime, monitoring, Svalbard, Barents Sea, vessel tracking',
-  authors: [{ name: 'SvalMap Team' }],
+  title: 'NorthWatch — maritime OSINT for the High North',
+  description:
+    'Live ships, sanctions and shadow-fleet lists, warnings and seabed infrastructure across the Norwegian Sea, Barents Sea and Svalbard',
+  keywords: 'maritime, OSINT, Norwegian Sea, Barents Sea, Svalbard, vessel tracking, sanctions, shadow fleet',
+  authors: [{ name: 'NorthWatch' }],
   viewport: 'width=device-width, initial-scale=1',
 };
 
@@ -34,7 +35,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${serif.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* Panels follow data-theme; set it before first paint so a light choice never flashes dark */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('svalmap.theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}",
+          }}
+        />
+      </head>
       <body className={`${sans.className} h-screen overflow-hidden`}>
         <div className="h-screen w-full">{children}</div>
       </body>

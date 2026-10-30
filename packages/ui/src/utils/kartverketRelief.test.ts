@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { RELIEF_COLOURS, parseRgb, reliefGain, tileBbox3857, tintKartverketRelief } from './kartverketRelief.ts';
+import { RELIEF_COLOURS, RELIEF_COLOURS_LIGHT, reliefColours, reliefGain, tileBbox3857, tintKartverketRelief } from './kartverketRelief.ts';
 
 // Pixels: level seabed, slope in shadow, slope in light, land (transparent)
 const px = new Uint8ClampedArray([
@@ -24,9 +24,11 @@ assert.equal(reliefGain(4), 3);
 assert.equal(reliefGain(14), 1.6);
 assert.ok(reliefGain(9) < 3 && reliefGain(9) > 1.6);
 
-assert.deepEqual(parseRgb('#061629'), [6, 22, 41]);
-assert.deepEqual(parseRgb('rgba(6, 22, 41, 1)'), [6, 22, 41]);
-assert.equal(parseRgb(['interpolate']), null);
+// Light map: level seabed is the light style's water (#F5F7F8)
+assert.equal(reliefColours('light'), RELIEF_COLOURS_LIGHT);
+const level = new Uint8ClampedArray([180, 180, 180, 255]);
+tintKartverketRelief(level, RELIEF_COLOURS_LIGHT, 2);
+assert.deepEqual([...level.slice(0, 3)], [0xf5, 0xf7, 0xf8]);
 
 // z1 tile (1,0) is the north-east quarter of the Mercator square
 const [minx, miny, maxx, maxy] = tileBbox3857(1, 1, 0);

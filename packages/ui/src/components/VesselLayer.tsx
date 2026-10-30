@@ -22,6 +22,7 @@ import { resolveShipClass } from '../utils/shipClass';
 import { buildVesselHoverHtml } from '../utils/vesselHover';
 import { buildProjectionRingFeatures } from '../utils/projectionRings';
 import { mapStyleReady } from '../utils/mapSafe';
+import type { MapTheme } from '../utils/kartverketRelief';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 
 export type VesselFeatureProps = {
@@ -112,7 +113,35 @@ type Props = {
   onTrack?: (track: VesselTrack | null) => void;
   /** Position picked on the timeline (null hides the marker). */
   scrub?: VesselScrub | null;
+  /** Basemap theme: light labels on the dark map, dark labels on the light one */
+  theme?: MapTheme;
 };
+
+const LABEL_THEME: Record<MapTheme, Record<string, [string, string]>> = {
+  dark: {
+    'vessels-label': ['#ffffff', 'rgba(0, 0, 0, 0.85)'],
+    'vessel-selected-label': ['#fde68a', 'rgba(4, 10, 20, 0.95)'],
+    'vessel-scrub-label': ['#f2c27f', 'rgba(4, 10, 20, 0.95)'],
+    'vessel-projection-labels': ['#e2e8f0', 'rgba(11, 18, 32, 0.92)'],
+  },
+  light: {
+    'vessels-label': ['#1c2a30', 'rgba(255, 255, 255, 0.92)'],
+    'vessel-selected-label': ['#8a4b0f', 'rgba(255, 255, 255, 0.95)'],
+    'vessel-scrub-label': ['#8a4b0f', 'rgba(255, 255, 255, 0.95)'],
+    'vessel-projection-labels': ['#334155', 'rgba(255, 255, 255, 0.92)'],
+  },
+};
+
+function applyLabelTheme(
+  map: { getLayer: (id: string) => unknown; setPaintProperty: (id: string, p: string, v: unknown) => void },
+  theme: MapTheme
+) {
+  for (const [id, [color, halo]] of Object.entries(LABEL_THEME[theme])) {
+    if (!map.getLayer(id)) continue;
+    map.setPaintProperty(id, 'text-color', color);
+    map.setPaintProperty(id, 'text-halo-color', halo);
+  }
+}
 
 const MARKER_IMAGES: { name: string; url: string }[] = [
   { name: 'Norwaycircle', url: '/markers/Circles/Norwaycircle.svg' },
@@ -349,8 +378,11 @@ export default function VesselLayer({
   selectedFallback = null,
   onTrack,
   scrub = null,
+  theme = 'dark',
 }: Props) {
   const map = useMap();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const apiBase =
     (process.env.NEXT_PUBLIC_API_BASE_URL as string) || 'http://localhost:8787';
   const onSelectRef = useRef(onVesselSelect);
@@ -688,8 +720,8 @@ export default function VesselLayer({
             'text-rotation-alignment': 'map',
           },
           paint: {
-            'text-color': '#e2e8f0',
-            'text-halo-color': 'rgba(11, 18, 32, 0.92)',
+            'text-color': LABEL_THEME[themeRef.current]['vessel-projection-labels'][0],
+            'text-halo-color': LABEL_THEME[themeRef.current]['vessel-projection-labels'][1],
             'text-halo-width': 1.2,
           },
         });
@@ -844,8 +876,8 @@ export default function VesselLayer({
             'text-ignore-placement': true,
           },
           paint: {
-            'text-color': '#fde68a',
-            'text-halo-color': 'rgba(4, 10, 20, 0.95)',
+            'text-color': LABEL_THEME[themeRef.current]['vessel-selected-label'][0],
+            'text-halo-color': LABEL_THEME[themeRef.current]['vessel-selected-label'][1],
             'text-halo-width': 2,
           },
         });
@@ -927,8 +959,8 @@ export default function VesselLayer({
             'text-ignore-placement': true,
           },
           paint: {
-            'text-color': '#f2c27f',
-            'text-halo-color': 'rgba(4, 10, 20, 0.95)',
+            'text-color': LABEL_THEME[themeRef.current]['vessel-scrub-label'][0],
+            'text-halo-color': LABEL_THEME[themeRef.current]['vessel-scrub-label'][1],
             'text-halo-width': 2,
           },
         });
@@ -1151,6 +1183,7 @@ export default function VesselLayer({
         map.setPaintProperty('vessels-label', 'text-opacity', labelOpacity);
         map.setLayerZoomRange('vessels-label', 7.5, 24);
       }
+      applyLabelTheme(map, themeRef.current);
       if (map.getLayer('sanction-indicator')) {
         map.setLayoutProperty('sanction-indicator', 'icon-size', badgeSize);
         map.setPaintProperty('sanction-indicator', 'icon-translate', badgeTranslate);
@@ -1260,8 +1293,8 @@ export default function VesselLayer({
             'text-ignore-placement': true,
           },
           paint: {
-            'text-color': '#ffffff',
-            'text-halo-color': 'rgba(0, 0, 0, 0.85)',
+            'text-color': LABEL_THEME[themeRef.current]['vessels-label'][0],
+            'text-halo-color': LABEL_THEME[themeRef.current]['vessels-label'][1],
             'text-halo-width': 1.5,
             'text-opacity': labelOpacity,
           },
@@ -1662,6 +1695,10 @@ export default function VesselLayer({
   useEffect(() => {
     showScrubRef.current?.();
   }, [scrub]);
+
+  useEffect(() => {
+    if (map && mapStyleReady(map)) applyLabelTheme(map, theme);
+  }, [map, theme]);
 
   // Position / name for vessels outside the live feed can arrive after the selection
   useEffect(() => {

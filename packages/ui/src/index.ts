@@ -21,6 +21,8 @@ export {
 } from './utils/vesselCategory';
 export type { VesselCategory, FlagCountry } from './utils/vesselCategory';
 export { default as OverlayLayers } from './components/OverlayLayers';
+export { default as BasemapTheme } from './components/BasemapTheme';
+export type { MapTheme } from './utils/kartverketRelief';
 export type { OverlayVisibility, CableFeatureProps, PortFeatureProps, RigFeatureProps, PipelineFeatureProps } from './components/OverlayLayers';
 export { default as GfwLayers } from './components/GfwLayers';
 export {

@@ -5,13 +5,12 @@ import { useMap } from '../hooks/useMap';
 import { mapStyleReady, safeGetLayer } from '../utils/mapSafe';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 import {
-  KV_RELIEF_TILES,
   SEABED_DEM_TILES,
+  kartverketReliefTiles,
   registerKartverketReliefProtocol,
   registerSeabedProtocol,
-  setKartverketReliefWater,
 } from '../utils/seabedDem';
-import { parseRgb } from '../utils/kartverketRelief';
+import type { MapTheme } from '../utils/kartverketRelief';
 
 export type OverlayVisibility = {
   'eez-norway': boolean;
@@ -23,6 +22,12 @@ export type OverlayVisibility = {
   pipelines: boolean;
   /** Legacy GeoNorge chart pipelines (not in use) */
   'pipelines-old': boolean;
+  'power-cables': boolean;
+  /** Kartverket sea-chart infrastructure, one toggle per kind */
+  'chart-cables': boolean;
+  'chart-pipelines': boolean;
+  'chart-spans': boolean;
+  'chart-aquaculture': boolean;
   /** Sodir oil / gas facility points */
   petroleum: boolean;
   /** Depth contours, depth labels and soundings (Open Waters, Kartverket near the coast) */
@@ -118,6 +123,15 @@ const OVERLAYS: OverlayDef[] = [
     lineWidth: 2.5,
   },
   {
+    id: 'power-cables',
+    file: 'power-cables-nve.geojson',
+    line: true,
+    fillColor: '#a3e635',
+    fillOpacity: 0,
+    lineColor: '#a3e635',
+    lineWidth: 1.6,
+  },
+  {
     id: 'pipelines-old',
     file: 'pipelines-geonorge.geojson',
     line: true,
@@ -187,6 +201,57 @@ const SEABED_RELIEF_LAYER = 'overlay-seabed-relief';
 const KV_RELIEF_SOURCE = 'overlay-seabed-kartverket';
 const KV_RELIEF_LAYER = 'overlay-seabed-relief-kartverket';
 const SEABED_LAYERS = [SEABED_RELIEF_LAYER, KV_RELIEF_LAYER];
+
+/**
+ * On the light map the bright overlay colours (cyan, lavender, light green, yellow) wash out;
+ * these darker, more saturated versions keep the same hues and their contrast.
+ */
+const LIGHT_OVERLAY: Partial<Record<keyof OverlayVisibility, { line: string; fill?: string }>> = {
+  'eez-norway': { line: '#0369a1', fill: '#0284c7' },
+  'eez-janmayen': { line: '#6d28d9', fill: '#7c3aed' },
+  'eez-svalbard': { line: '#15803d', fill: '#16a34a' },
+  'ice-edge': { line: '#0e7490' },
+  cables: { line: '#0891b2' },
+  'cables-telegeography': { line: '#be185d' },
+  'pipelines-old': { line: '#64748b' },
+  'power-cables': { line: '#4d7c0f' },
+  pipelines: { line: '#c2410c' },
+  nsm: { line: '#dc2626', fill: '#ef4444' },
+  skytefelt: { line: '#a16207', fill: '#ca8a04' },
+  ports: { line: '#475569', fill: '#475569' },
+};
+const lineColorFor = (def: OverlayDef, theme: MapTheme): any =>
+  theme === 'light'
+    ? LIGHT_OVERLAY[def.id]?.line ?? def.lineColor
+    : def.id === 'cables-telegeography'
+      ? ['coalesce', ['get', 'color'], def.lineColor]
+      : def.lineColor;
+const fillColorFor = (def: OverlayDef, theme: MapTheme) =>
+  (theme === 'light' && LIGHT_OVERLAY[def.id]?.fill) || def.fillColor;
+
+/** Depth contours, labels and soundings per theme; TeleGeography landing points too. */
+const BATHY_THEME = {
+  dark: { label: '#a8c0d4', halo: 'rgba(8, 15, 24, 0.85)', sounding: '#7f9bb5', major: '#8aa4bc', minor: '#6b849e' },
+  light: { label: '#4f6b7c', halo: 'rgba(245, 247, 248, 0.9)', sounding: '#6b8597', major: '#7f94a4', minor: '#a6b5c0' },
+};
+const LANDING_THEME = {
+  dark: { circle: '#f9a8d4', text: '#fbcfe8', halo: 'rgba(0,0,0,0.7)' },
+  light: { circle: '#be185d', text: '#9d174d', halo: 'rgba(255,255,255,0.9)' },
+};
+
+/** DEM relief paint per map theme (Kartverket's tiles carry the same colours, see kartverketRelief.ts). */
+const RELIEF_PAINT: Record<MapTheme, Record<string, string>> = {
+  dark: {
+    'hillshade-shadow-color': 'rgba(0, 4, 12, 0.9)',
+    'hillshade-highlight-color': 'rgba(120, 160, 200, 0.35)',
+    'hillshade-accent-color': 'rgba(0, 0, 0, 0.3)',
+  },
+  light: {
+    'hillshade-shadow-color': 'rgba(60, 80, 100, 0.4)',
+    'hillshade-highlight-color': 'rgba(255, 255, 255, 0.55)',
+    'hillshade-accent-color': 'rgba(60, 80, 100, 0.1)',
+  },
+};
 /** Earlier ids: a DEM of its own, then a relief on the land+sea basemap terrain. */
 const LEGACY_BATHY_LAYERS = [
   'overlay-bathymetry-hillshade',
@@ -198,6 +263,36 @@ const LEGACY_BATHY_LAYERS = [
  * and soundings / shoals (from ~z15) in Norwegian waters. The service only draws
  * them at large scales, so the layer starts where Open Waters steps back.
  */
+/**
+ * Kartverket "Sjøkart – Maritim infrastruktur" WMS (CC BY 4.0): sea cables and pipelines,
+ * overhead spans and bridges with their clearance, aquaculture moorings, platforms — as
+ * reported for the nautical charts, coast, Svalbard and Jan Mayen. Drawn in chart symbology.
+ */
+/**
+ * The service only draws each kind from a certain scale (cables from about z12). Cables,
+ * spans and moorings are dark grey / dark blue chart ink — inverted on the dark map so they
+ * show; pipelines are red and stay red.
+ */
+const MARITIME_INFRA: {
+  key: 'chart-cables' | 'chart-pipelines' | 'chart-spans' | 'chart-aquaculture';
+  layers: string;
+  minzoom: number;
+  invertOnDark: boolean;
+}[] = [
+  { key: 'chart-cables', layers: 'kabel_l,kabel_a', minzoom: 12, invertOnDark: true },
+  { key: 'chart-pipelines', layers: 'rorledning_l,rorledning_a', minzoom: 8, invertOnDark: false },
+  { key: 'chart-spans', layers: 'Luftspenn,bro_l,bro_a,taubane', minzoom: 10, invertOnDark: true },
+  { key: 'chart-aquaculture', layers: 'akvakultur_a,akvakultur_p,fortoyningskabel', minzoom: 10, invertOnDark: true },
+];
+const chartInkPaint = (invert: boolean, theme: MapTheme) =>
+  invert && theme === 'dark'
+    ? { 'raster-brightness-min': 0.85, 'raster-brightness-max': 0.15 }
+    : { 'raster-brightness-min': 0, 'raster-brightness-max': 1 };
+const maritimeInfraTiles = (layers: string) =>
+  'https://wms.geonorge.no/skwms1/wms.maritim_infrastruktur?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+  `&LAYERS=${layers}&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=512&HEIGHT=512` +
+  '&FORMAT=image/png&TRANSPARENT=true';
+
 const KV_DEPTH_SOURCE = 'overlay-bathymetry-kartverket';
 const KV_DEPTH_MINZOOM = 13.5;
 const KV_DEPTH_TILES =
@@ -221,13 +316,6 @@ const BATHY_IS_MAJOR: any = [
   '==',
   ['%', ['coalesce', ['to-number', ['get', 'depth_abs_m']], -1], 500],
   0,
-];
-
-const BATHY_LINE_COLOR: any = [
-  'case',
-  BATHY_IS_MAJOR,
-  '#8aa4bc',
-  '#6b849e',
 ];
 
 const BATHY_LINE_WIDTH: any = [
@@ -306,17 +394,19 @@ const BATHY_LABEL_SIZE: any = [
   15,
 ];
 
-const BATHY_LABEL_COLOR = '#a8c0d4';
-const BATHY_LABEL_HALO = 'rgba(8, 15, 24, 0.85)';
 
-function applyBathymetryPaint(map: {
-  setPaintProperty: (id: string, prop: string, value: unknown) => void;
-  setLayoutProperty: (id: string, prop: string, value: unknown) => void;
-  setFilter: (id: string, filter: any) => unknown;
-  getLayer: (id: string) => unknown;
-}) {
+function applyBathymetryPaint(
+  map: {
+    setPaintProperty: (id: string, prop: string, value: unknown) => void;
+    setLayoutProperty: (id: string, prop: string, value: unknown) => void;
+    setFilter: (id: string, filter: any) => unknown;
+    getLayer: (id: string) => unknown;
+  },
+  theme: MapTheme = 'dark'
+) {
+  const c = BATHY_THEME[theme];
   if (map.getLayer('overlay-bathymetry-contours')) {
-    map.setPaintProperty('overlay-bathymetry-contours', 'line-color', BATHY_LINE_COLOR);
+    map.setPaintProperty('overlay-bathymetry-contours', 'line-color', ['case', BATHY_IS_MAJOR, c.major, c.minor]);
     map.setPaintProperty('overlay-bathymetry-contours', 'line-width', BATHY_LINE_WIDTH);
     map.setPaintProperty(
       'overlay-bathymetry-contours',
@@ -334,8 +424,8 @@ function applyBathymetryPaint(map: {
       ],
     ]);
     map.setFilter('overlay-bathymetry-labels', BATHY_LABEL_FILTER);
-    map.setPaintProperty('overlay-bathymetry-labels', 'text-color', BATHY_LABEL_COLOR);
-    map.setPaintProperty('overlay-bathymetry-labels', 'text-halo-color', BATHY_LABEL_HALO);
+    map.setPaintProperty('overlay-bathymetry-labels', 'text-color', c.label);
+    map.setPaintProperty('overlay-bathymetry-labels', 'text-halo-color', c.halo);
     map.setPaintProperty('overlay-bathymetry-labels', 'text-halo-width', 1.25);
   }
 }
@@ -416,8 +506,13 @@ export type CableFeatureProps = {
   id: string;
   name: string;
   source: string;
-  kind: 'nkom' | 'telegeography' | 'landing';
+  kind: 'nkom' | 'telegeography' | 'landing' | 'power';
   is_planned?: boolean;
+  /** NVE power cables */
+  owner?: string | null;
+  netLevel?: string | null;
+  voltageKv?: number | null;
+  year?: number | null;
   rfs_year?: number | null;
   color?: string | null;
   kabeltype?: string | null;
@@ -485,6 +580,8 @@ type Props = {
   onPortSelect?: (port: PortFeatureProps) => void;
   onRigSelect?: (rig: RigFeatureProps) => void;
   onPipelineSelect?: (pipeline: PipelineFeatureProps) => void;
+  /** Light or dark basemap: the seabed relief is drawn in matching colours */
+  theme?: MapTheme;
 };
 
 function strProp(p: Record<string, unknown>, ...keys: string[]): string | null {
@@ -514,8 +611,11 @@ export default function OverlayLayers({
   onPortSelect,
   onRigSelect,
   onPipelineSelect,
+  theme = 'dark',
 }: Props) {
   const map = useMap();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const onCableRef = useRef(onCableSelect);
   onCableRef.current = onCableSelect;
   const onPortRef = useRef(onPortSelect);
@@ -550,7 +650,7 @@ export default function OverlayLayers({
             source: sourceId,
             layout: { visibility: vis(visibility[def.id]) },
             paint: {
-              'fill-color': def.fillColor,
+              'fill-color': fillColorFor(def, themeRef.current),
               'fill-opacity': def.fillOpacity,
             },
           });
@@ -560,11 +660,7 @@ export default function OverlayLayers({
             'line-width': def.lineWidth,
             'line-opacity': def.lineOpacity ?? 0.9,
           };
-          if (def.id === 'cables-telegeography') {
-            paint['line-color'] = ['coalesce', ['get', 'color'], def.lineColor];
-          } else {
-            paint['line-color'] = def.lineColor;
-          }
+          paint['line-color'] = lineColorFor(def, themeRef.current);
           map.addLayer({
             id: `${sourceId}-line`,
             type: 'line',
@@ -579,6 +675,7 @@ export default function OverlayLayers({
           if (
             def.id === 'cables' ||
             def.id === 'cables-telegeography' ||
+            def.id === 'power-cables' ||
             def.id === 'pipelines' ||
             def.id === 'pipelines-old'
           ) {
@@ -609,7 +706,7 @@ export default function OverlayLayers({
             layout: { visibility: vis(visibility[def.id]) },
             paint: {
               'circle-radius': isPorts ? PORT_CIRCLE_RADIUS : 4,
-              'circle-color': def.lineColor,
+              'circle-color': lineColorFor(def, themeRef.current),
               'circle-stroke-width': isPorts ? PORT_STROKE_WIDTH : 1,
               'circle-stroke-color': '#fff',
               'circle-opacity': 0.5,
@@ -652,7 +749,7 @@ export default function OverlayLayers({
             'line-join': 'round',
           },
           paint: {
-            'line-color': def.lineColor,
+            'line-color': lineColorFor(def, themeRef.current),
             'line-width': def.lineWidth,
             'line-opacity': 0.95,
           },
@@ -744,9 +841,7 @@ export default function OverlayLayers({
             layout: { visibility: vis(visibility['seabed-relief']) },
             paint: {
               'hillshade-illumination-direction': 315,
-              'hillshade-shadow-color': 'rgba(0, 4, 12, 0.9)',
-              'hillshade-highlight-color': 'rgba(120, 160, 200, 0.35)',
-              'hillshade-accent-color': 'rgba(0, 0, 0, 0.3)',
+              ...RELIEF_PAINT[themeRef.current],
               'hillshade-exaggeration': ['interpolate', ['linear'], ['zoom'], 2, 0.75, 8, 0.6, 12, 0.45],
             },
           } as any,
@@ -755,11 +850,10 @@ export default function OverlayLayers({
       }
 
       registerKartverketReliefProtocol();
-      setKartverketReliefWater(parseRgb(map.getPaintProperty('water-fill', 'fill-color')));
       if (!map.getSource(KV_RELIEF_SOURCE)) {
         map.addSource(KV_RELIEF_SOURCE, {
           type: 'raster',
-          tiles: [KV_RELIEF_TILES],
+          tiles: [kartverketReliefTiles(themeRef.current)],
           tileSize: 256,
           minzoom: 5,
           maxzoom: 14,
@@ -809,7 +903,7 @@ export default function OverlayLayers({
               'line-join': 'round',
             },
             paint: {
-              'line-color': BATHY_LINE_COLOR,
+              'line-color': ['case', BATHY_IS_MAJOR, BATHY_THEME[themeRef.current].major, BATHY_THEME[themeRef.current].minor],
               'line-width': BATHY_LINE_WIDTH,
               'line-opacity': BATHY_LINE_OPACITY,
             },
@@ -852,8 +946,8 @@ export default function OverlayLayers({
               'text-ignore-placement': false,
             },
             paint: {
-              'text-color': BATHY_LABEL_COLOR,
-              'text-halo-color': BATHY_LABEL_HALO,
+              'text-color': BATHY_THEME[themeRef.current].label,
+              'text-halo-color': BATHY_THEME[themeRef.current].halo,
               'text-halo-width': 1.25,
               'text-opacity': [
                 'interpolate',
@@ -891,8 +985,8 @@ export default function OverlayLayers({
               'text-allow-overlap': false,
             },
             paint: {
-              'text-color': '#7f9bb5',
-              'text-halo-color': BATHY_LABEL_HALO,
+              'text-color': BATHY_THEME[themeRef.current].sounding,
+              'text-halo-color': BATHY_THEME[themeRef.current].halo,
               'text-halo-width': 1,
             },
           } as any,
@@ -939,7 +1033,7 @@ export default function OverlayLayers({
         );
       }
 
-      applyBathymetryPaint(map);
+      applyBathymetryPaint(map, themeRef.current);
     }
 
     async function loadTgLandings() {
@@ -958,7 +1052,7 @@ export default function OverlayLayers({
         layout: { visibility: vis(visibility['cables-telegeography']) },
         paint: {
           'circle-radius': 4,
-          'circle-color': '#f9a8d4',
+          'circle-color': LANDING_THEME[themeRef.current].circle,
           'circle-stroke-width': 1,
           'circle-stroke-color': '#fff',
           'circle-opacity': 0.5,
@@ -979,8 +1073,8 @@ export default function OverlayLayers({
           'text-optional': true,
         },
         paint: {
-          'text-color': '#fbcfe8',
-          'text-halo-color': 'rgba(0,0,0,0.7)',
+          'text-color': LANDING_THEME[themeRef.current].text,
+          'text-halo-color': LANDING_THEME[themeRef.current].halo,
           'text-halo-width': 1,
         },
       });
@@ -1030,8 +1124,40 @@ export default function OverlayLayers({
         await loadPetroleumPoints();
         await loadMoveableRigs().catch((e) => console.error('[rigs]', e));
         await loadTgLandings();
+        addMaritimeInfra();
       } catch (e) {
         console.error('[OverlayLayers]', e);
+      }
+    }
+
+    // One WMS source per kind, so each toggle only fetches its own tiles
+    function addMaritimeInfra() {
+      for (const { key, layers, minzoom, invertOnDark } of MARITIME_INFRA) {
+        const sourceId = `overlay-${key}`;
+        if (!mapStyleReady(map) || map.getSource(sourceId)) continue;
+        map.addSource(sourceId, {
+          type: 'raster',
+          tiles: [maritimeInfraTiles(layers)],
+          tileSize: 256,
+          minzoom,
+          maxzoom: 18,
+          attribution: '© <a href="https://kartverket.no">Kartverket</a> (Sjøkart – Maritim infrastruktur)',
+        } as any);
+        map.addLayer(
+          {
+            id: `${sourceId}-raster`,
+            type: 'raster',
+            source: sourceId,
+            minzoom,
+            layout: { visibility: vis(visibilityRef.current[key]) },
+            paint: {
+              'raster-opacity': 0.95,
+              'raster-fade-duration': 0,
+              ...chartInkPaint(invertOnDark, themeRef.current),
+            },
+          },
+          beforeIdForBathymetry(map)
+        );
       }
     }
 
@@ -1047,6 +1173,19 @@ export default function OverlayLayers({
       const layerId = String(f.layer?.id || '');
       const isTg = layerId.includes('telegeography') || layerId.includes('tg-landings');
       const isLanding = layerId.includes('tg-landings');
+      if (layerId.includes('power-cables')) {
+        onCableRef.current({
+          id: String(p.id || 'power-cable'),
+          name: String(p.name || (p.owner ? `${p.owner} sea cable` : 'Power cable')),
+          source: String(p.source || 'NVE Nettanlegg'),
+          kind: 'power',
+          owner: p.owner ? String(p.owner) : null,
+          netLevel: p.netLevel ? String(p.netLevel) : null,
+          voltageKv: p.voltageKv != null && p.voltageKv !== '' ? Number(p.voltageKv) : null,
+          year: p.year != null && p.year !== '' ? Number(p.year) : null,
+        });
+        return;
+      }
       onCableRef.current({
         id: String(p.id || p.lokalid || p.name || 'cable'),
         name: String(p.name || p.navn || p.kabeltype || 'Undersea cable'),
@@ -1159,6 +1298,7 @@ export default function OverlayLayers({
     const cableLayers = [
       'overlay-cables-hit',
       'overlay-cables-telegeography-hit',
+      'overlay-power-cables-hit',
       'overlay-tg-landings-circle',
     ];
     const portLayers = ['overlay-ports-hit', 'overlay-ports-circle'];
@@ -1225,6 +1365,39 @@ export default function OverlayLayers({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, apiBase]);
+
+  // Basemap theme: recolour the DEM relief and fetch Kartverket's tiles in the other colours
+  useEffect(() => {
+    if (!mapStyleReady(map)) return;
+    if (safeGetLayer(map, SEABED_RELIEF_LAYER)) {
+      for (const [prop, value] of Object.entries(RELIEF_PAINT[theme])) {
+        map.setPaintProperty(SEABED_RELIEF_LAYER, prop, value);
+      }
+    }
+    const kv = map.getSource(KV_RELIEF_SOURCE) as any;
+    kv?.setTiles?.([kartverketReliefTiles(theme)]);
+    const paint = (id: string, prop: string, value: unknown) => {
+      if (safeGetLayer(map, id)) map.setPaintProperty(id, prop, value);
+    };
+    for (const def of OVERLAYS) {
+      const sourceId = `overlay-${def.id}`;
+      paint(`${sourceId}-fill`, 'fill-color', fillColorFor(def, theme));
+      paint(`${sourceId}-line`, 'line-color', lineColorFor(def, theme));
+      paint(`${sourceId}-circle`, 'circle-color', lineColorFor(def, theme));
+      paint(`${sourceId}-boundary-line`, 'line-color', lineColorFor(def, theme));
+    }
+    applyBathymetryPaint(map, theme);
+    for (const { key, invertOnDark } of MARITIME_INFRA) {
+      for (const [prop, value] of Object.entries(chartInkPaint(invertOnDark, theme))) {
+        paint(`overlay-${key}-raster`, prop, value);
+      }
+    }
+    paint('overlay-bathymetry-soundings', 'text-color', BATHY_THEME[theme].sounding);
+    paint('overlay-bathymetry-soundings', 'text-halo-color', BATHY_THEME[theme].halo);
+    paint('overlay-tg-landings-circle', 'circle-color', LANDING_THEME[theme].circle);
+    paint('overlay-tg-landings-label', 'text-color', LANDING_THEME[theme].text);
+    paint('overlay-tg-landings-label', 'text-halo-color', LANDING_THEME[theme].halo);
+  }, [map, theme]);
 
   useEffect(() => {
     if (!mapStyleReady(map)) return;
@@ -1303,12 +1476,17 @@ export default function OverlayLayers({
         map.setLayoutProperty(lid, 'visibility', bathyVis);
       }
     }
+    for (const { key } of MARITIME_INFRA) {
+      if (safeGetLayer(map, `overlay-${key}-raster`)) {
+        map.setLayoutProperty(`overlay-${key}-raster`, 'visibility', vis(visibility[key]));
+      }
+    }
     for (const lid of SEABED_LAYERS) {
       if (safeGetLayer(map, lid)) map.setLayoutProperty(lid, 'visibility', vis(visibility['seabed-relief']));
     }
     if (visibility.bathymetry) {
       try {
-        applyBathymetryPaint(map);
+        applyBathymetryPaint(map, themeRef.current);
       } catch {
         /* ignore */
       }

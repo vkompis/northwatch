@@ -43,6 +43,8 @@ import {
   MOVEABLE_FILE,
 } from './fetchSodirFacilities';
 import { fetchSodirPipelinesToFile } from './fetchSodirPipelines';
+import { fetchNvePowerCablesToFile, readPowerCablesMeta } from './fetchNvePowerCables';
+import { currentInfraDwell, INFRA_WATCH_RULES, resetInfraWatch, updateInfraWatch } from './infraWatch';
 import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
 import { gurImoSets, sanctionListings } from './sanctionListings';
 import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
@@ -1106,6 +1108,7 @@ async function refreshPetroleum(reason: string): Promise<{
       console.warn('[petroleum/sodir] pipelines refresh failed', pipelines.error);
       return { ok: false, error: pipelines.error };
     }
+    resetInfraWatch();
     console.log(
       `[petroleum/sodir] ok facilities=${facilities.featureCount} pipelines=${pipelines.featureCount} source=sodir-factmaps`
     );
@@ -1986,6 +1989,26 @@ app.get('/api/incidents/live', async (req, res) => {
       });
     }
 
+    // Any ship lingering over cables / pipelines (tracked every minute, see infraWatch.ts)
+    const byMmsi = new Map(list.map((v: any) => [String(v.mmsi), v]));
+    for (const d of currentInfraDwell(now)) {
+      const v = byMmsi.get(d.mmsi);
+      const why = v ? interestReason(v) : null;
+      const minutes = Math.round((now - d.since) / 60000);
+      incidents.push({
+        id: `infra-${d.mmsi}`,
+        type: 'infra',
+        title: `Lingering over ${d.infra.kind}${why ? ` · ${why.label}` : ''}`,
+        message: `${v ? name(v) : d.mmsi} · ${minutes} min within ${d.distanceM} m of ${d.infra.name}`,
+        mmsi: [d.mmsi],
+        lon: d.lon,
+        lat: d.lat,
+        minutes,
+        // Ships of interest keep their rank; any other ship comes after them
+        rank: why ? why.rank : 5,
+      });
+    }
+
     // Most serious vessel first, then closest approach
     incidents.sort((a, b) => a.rank - b.rank || (a.distanceNm ?? 99) - (b.distanceNm ?? 99));
     res.json({
@@ -1995,8 +2018,9 @@ app.get('/api/incidents/live', async (req, res) => {
         liveCount: list.length,
         proxNm,
         loiterKn,
+        infraRules: INFRA_WATCH_RULES,
         note:
-          'Heuristic only — Russian / sanctioned / shadow / research vessels at sea; harbours, moored and >3 h old fixes skipped.',
+          'Heuristic only — Russian / sanctioned / shadow / research vessels at sea, and any ship lingering over cables or pipelines; harbours, moored and old fixes skipped.',
       },
     });
   } catch (e: any) {
@@ -3715,6 +3739,23 @@ app.listen(PORT, () => {
     }
   }
 
+  // NVE high-voltage sea cables — weekly (NVE updates about twice a year), and on startup
+  // when the file is missing or over two weeks old
+  const refreshPowerCables = (reason: string) =>
+    fetchNvePowerCablesToFile(OVERLAYS_DIR).then((r) => {
+      if (r.ok) resetInfraWatch();
+      console.log(`[power-cables/nve] ${reason} ok=${r.ok} count=${r.featureCount ?? 0}${r.error ? ` ${r.error}` : ''}`);
+    });
+  cron.schedule('50 6 * * 1', () => {
+    refreshPowerCables('weekly-cron').catch((e) => console.warn('[power-cables/nve] cron failed', e));
+  });
+  {
+    const fetchedAt = Date.parse(readPowerCablesMeta(OVERLAYS_DIR)?.fetchedAt || '');
+    if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt > 14 * 24 * 3600e3) {
+      refreshPowerCables('startup').catch((e) => console.warn('[power-cables/nve] startup failed', e));
+    }
+  }
+
   // Sodir FactMaps facilities + pipelines — daily + startup if missing/stale (>7d) or not Sodir
   cron.schedule('45 6 * * *', () => {
     refreshPetroleum('daily-cron').catch((e) =>
@@ -3805,6 +3846,20 @@ app.listen(PORT, () => {
   refreshGur('startup').catch((e) => console.warn('[gur] startup refresh failed', e));
 
   // File-backed area alerts — runs without an open browser (email if SMTP configured)
+  // Ships lingering over cables and pipelines: checked every minute (fixes older than 30 min skipped)
+  setInterval(() => {
+    getLivePositionsList()
+      .then((list) => {
+        const now = Date.now();
+        const recent = (v: any) => {
+          const t = Date.parse(String(v.timestamp ?? ''));
+          return Number.isFinite(t) && now - t <= 30 * 60 * 1000;
+        };
+        updateInfraWatch(OVERLAYS_DIR, list, (v) => recent(v) && !inHarbour(v), now);
+      })
+      .catch((e) => console.warn('[infra-watch]', e?.message || e));
+  }, 60_000);
+
   startAlertWatcher(async () => {
     const list = await getLivePositionsList();
     return list.map((v) => ({

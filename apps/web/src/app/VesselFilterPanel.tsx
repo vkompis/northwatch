@@ -106,41 +106,6 @@ export default function VesselFilterPanel({
         </button>
       )}
 
-      <div className="panel-kicker">Category · marker colour</div>
-      {CATEGORY_KEYS.map((key) => (
-        <LayerRow
-          key={key}
-          label={CATEGORY_LABELS[key]}
-          marker={<TriangleMarker color={HEADER_COLORS[key]} />}
-          count={counts.category[key]}
-          checked={filters[key]}
-          onChange={(on) => set(key, on)}
-        />
-      ))}
-
-      <button
-        type="button"
-        className={`disclaimer-toggle filter-subtoggle ${typesOpen ? 'open' : ''}`}
-        onClick={() => setTypesOpen((v) => !v)}
-        aria-expanded={typesOpen}
-      >
-        Ship type · {typeSummary}
-      </button>
-      {typesOpen && (
-        <>
-          <p className="panel-note">Civilian vessels only — military and research follow their category.</p>
-          {SHIP_CLASS_KEYS.map((key) => (
-            <LayerRow
-              key={key}
-              label={SHIP_CLASS_LABELS[key]}
-              count={counts.shipClass[key]}
-              checked={filters[key]}
-              onChange={(on) => set(key, on)}
-            />
-          ))}
-        </>
-      )}
-
       <div className="panel-kicker">
         Show only · {anyFocusActive(filters) ? 'any of the checked' : 'off'}
       </div>
@@ -185,6 +150,41 @@ export default function VesselFilterPanel({
         checked={filters.recent6h}
         onChange={(on) => set('recent6h', on)}
       />
+      <div className="panel-kicker">Category · marker colour</div>
+      {CATEGORY_KEYS.map((key) => (
+        <LayerRow
+          key={key}
+          label={CATEGORY_LABELS[key]}
+          marker={<TriangleMarker color={HEADER_COLORS[key]} />}
+          count={counts.category[key]}
+          checked={filters[key]}
+          onChange={(on) => set(key, on)}
+        />
+      ))}
+
+      <button
+        type="button"
+        className={`disclaimer-toggle filter-subtoggle ${typesOpen ? 'open' : ''}`}
+        onClick={() => setTypesOpen((v) => !v)}
+        aria-expanded={typesOpen}
+      >
+        Ship type · {typeSummary}
+      </button>
+      {typesOpen && (
+        <>
+          <p className="panel-note">Civilian vessels only — military and research follow their category.</p>
+          {SHIP_CLASS_KEYS.map((key) => (
+            <LayerRow
+              key={key}
+              label={SHIP_CLASS_LABELS[key]}
+              count={counts.shipClass[key]}
+              checked={filters[key]}
+              onChange={(on) => set(key, on)}
+            />
+          ))}
+        </>
+      )}
+
     </>
   );
 }

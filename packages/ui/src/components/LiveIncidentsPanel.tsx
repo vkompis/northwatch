@@ -5,7 +5,7 @@ import axios from 'axios';
 
 export type LiveIncident = {
   id: string;
-  type: 'proximity' | 'loiter';
+  type: 'proximity' | 'loiter' | 'infra';
   title: string;
   message: string;
   mmsi: string[];
@@ -13,6 +13,8 @@ export type LiveIncident = {
   lat: number;
   distanceNm?: number;
   speed?: number;
+  /** Lingering over infrastructure: minutes so far */
+  minutes?: number;
 };
 
 type Props = {
@@ -64,7 +66,8 @@ export default function LiveIncidentsPanel({
     <div className={`live-incidents ${className}`.trim()}>
       <div className="item hint">
         Russian, sanctioned, shadow-fleet &amp; research vessels stopped at sea or meeting
-        another ship (harbours skipped)
+        another ship, and any ship slower than 2 kn for 30 min within 500 m of a cable or
+        pipeline (harbours skipped)
       </div>
       {error && <div className="item hint warn">{error}</div>}
       {!error && !items.length && <div className="item hint">No hits right now</div>}
