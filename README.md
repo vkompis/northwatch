@@ -42,7 +42,6 @@ svalmap/
 │   ├── ui/           # Reusable React / MapLibre components
 │   └── config/       # Shared configuration
 ├── data/source/      # GeoJSON overlays, sanctions CSVs, markers
-├── sql/              # BigQuery SQL
 └── docs/             # Architecture, security, deploy notes
 ```
 
