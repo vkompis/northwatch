@@ -14,7 +14,6 @@
 
 ## Data Privacy
 - Do not expose raw vessel positions in the UI or API.
-- Firestore stores only summarized incident documents, not raw AIS.
 
 ## Secrets Management
 - All sensitive values (BarentsWatch tokens, API keys, Firebase credentials) are stored in GCP Secret Manager.
