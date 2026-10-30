@@ -49,6 +49,7 @@ import {
   sameFilters,
   type MapTheme,
   isRussianResearchVessel,
+  RUSSIAN_RESEARCH_VESSELS,
 } from '@svalmap/ui';
 import VesselFilterPanel from './VesselFilterPanel';
 import MapMenu, { MENU_ICONS, type MapMenuId, type MapMenuItem } from './MapMenu';
@@ -270,7 +271,11 @@ export default function HomePage() {
       setWatchlist(loadWatchlist());
       setLegendOpen(false);
       const url = parseUrlState();
-      if (url.mmsi) setPendingMmsi(url.mmsi);
+      if (url.mmsi) {
+        setPendingMmsi(url.mmsi);
+        // A shared link keeps its own track range when the ship opens
+        openedMmsiRef.current = url.mmsi;
+      }
       if (typeof url.ships === 'boolean') setShipsVisible(url.ships);
       if (url.trackDays) setTrackDays(url.trackDays);
       // URL filters only apply when prefs already exist for this version.
@@ -569,8 +574,15 @@ export default function HomePage() {
   useEffect(() => {
     if (!pendingMmsi) return;
     const hit = liveVessels.find((v) => v.mmsi === pendingMmsi);
-    if (hit) openVessel(hit);
-  }, [pendingMmsi, liveVessels, openVessel]);
+    if (hit) {
+      openVessel(hit);
+      return;
+    }
+    // A research ship may stay unheard for weeks, so its link opens the dossier without waiting
+    if (selection || !liveVessels.length) return;
+    const research = RUSSIAN_RESEARCH_VESSELS.find((v) => v.mmsi === pendingMmsi);
+    if (research) openVesselByMmsi(research.mmsi, { name: research.name, imo: research.imo, research: true });
+  }, [pendingMmsi, liveVessels, openVessel, openVesselByMmsi, selection]);
 
   // Keep the open detail card in step with the 2-minute live refresh
   useEffect(() => {
