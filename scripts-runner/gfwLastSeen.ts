@@ -84,6 +84,14 @@ function recordOf(ev: any): GfwLastSeenRecord | null {
   return null;
 }
 
+/** Older positions stay in the dossier: a dot on the map from years ago would mislead. */
+export const MAX_AGE_ON_MAP_MS = 90 * 24 * 3600e3;
+
+export function recentEnoughForMap(time: string, now = Date.now()): boolean {
+  const t = Date.parse(time);
+  return Number.isFinite(t) && now - t <= MAX_AGE_ON_MAP_MS;
+}
+
 /** The newest dated position in a list of GFW events. */
 export function latestDatedPosition(events: any[]): GfwLastSeenRecord | null {
   let best: GfwLastSeenRecord | null = null;

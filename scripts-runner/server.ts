@@ -53,7 +53,7 @@ import {
   quietLeadsForDetection,
   sentinel1Url,
 } from './darkVessels';
-import { identitiesForMmsi, latestDatedPosition } from './gfwLastSeen';
+import { identitiesForMmsi, latestDatedPosition, recentEnoughForMap } from './gfwLastSeen';
 import { gurMetaAgeMs, updateGurVessels, GUR_VESSELS_META } from './gurVessels';
 import { gurImoSets, sanctionListings } from './sanctionListings';
 import { fleetleaksAgeMs, updateFleetleaks } from './fleetleaks';
@@ -1679,9 +1679,12 @@ async function buildLivePositionsList(): Promise<{
   return { list: Array.from(byMmsi.values()), partial: bwPartial };
 }
 
+// The map also gets research ships no receiver has heard, at their last GFW position. They stay
+// out of getLivePositionsList: alerts and the cable watch must only act on live AIS.
 app.get('/api/live-positions', async (_req, res) => {
   try {
-    res.json(await getLivePositionsList());
+    const list = await getLivePositionsList();
+    res.json([...list, ...researchLastSeenRecords(new Set(list.map((v) => v.mmsi)))]);
   } catch (e: any) {
     res.status(500).json({ error: e?.message || String(e) });
   }
@@ -2725,6 +2728,49 @@ async function loadGfwLastSeen(mmsi: string) {
   };
 }
 
+async function gfwLastSeen(mmsi: string) {
+  const cached = GFW_LAST_SEEN_CACHE.get(mmsi);
+  if (cached && Date.now() - cached.ts < GFW_LAST_SEEN_TTL_MS) return { ...cached.payload, cached: true };
+  let load = GFW_LAST_SEEN_INFLIGHT.get(mmsi);
+  if (!load) {
+    load = loadGfwLastSeen(mmsi)
+      .then((payload) => {
+        GFW_LAST_SEEN_CACHE.set(mmsi, { ts: Date.now(), payload });
+        return payload;
+      })
+      .finally(() => GFW_LAST_SEEN_INFLIGHT.delete(mmsi));
+    GFW_LAST_SEEN_INFLIGHT.set(mmsi, load);
+  }
+  return load;
+}
+
+/** One at a time, as GFW asks. A ship that fails keeps the position it already had. */
+async function refreshResearchLastSeen() {
+  for (const { mmsi } of RUSSIAN_RESEARCH_VESSELS) {
+    try {
+      await gfwLastSeen(mmsi);
+    } catch (e: any) {
+      console.warn('[gfw/last-seen]', mmsi, e?.message || e);
+    }
+  }
+}
+
+/** Research ships not heard on AIS, at their last GFW position if it is recent enough to draw. */
+function researchLastSeenRecords(heard: Set<string>): any[] {
+  const out: any[] = [];
+  for (const { mmsi, name, imo } of RUSSIAN_RESEARCH_VESSELS) {
+    if (heard.has(mmsi)) continue;
+    const seen = GFW_LAST_SEEN_CACHE.get(mmsi)?.payload?.lastSeen;
+    if (!seen || !recentEnoughForMap(seen.time)) continue;
+    const record = normalizeLiveVessel(
+      { mmsi, lon: seen.lon, lat: seen.lat, vessel_name: name, imo, timestamp: seen.time, source: 'gfw' },
+      { ignoreDisplayRules: true }
+    );
+    if (record) out.push({ ...record, lastSeenOnly: true });
+  }
+  return out;
+}
+
 /** Newest dated position GFW has for a research, sanctioned or shadow-fleet ship. */
 app.get('/api/gfw/vessel-last-seen', async (req, res) => {
   try {
@@ -2735,21 +2781,7 @@ app.get('/api/gfw/vessel-last-seen', async (req, res) => {
     if (!isRussianResearchVessel(mmsi) && !SANCTIONED_MMSI.has(mmsi) && !SHADOWFLEET_MMSI.has(mmsi)) {
       return res.status(403).json({ error: 'Only research, sanctioned and shadow-fleet ships' });
     }
-    const cached = GFW_LAST_SEEN_CACHE.get(mmsi);
-    if (cached && Date.now() - cached.ts < GFW_LAST_SEEN_TTL_MS) {
-      return res.json({ ...cached.payload, cached: true });
-    }
-    let load = GFW_LAST_SEEN_INFLIGHT.get(mmsi);
-    if (!load) {
-      load = loadGfwLastSeen(mmsi)
-        .then((payload) => {
-          GFW_LAST_SEEN_CACHE.set(mmsi, { ts: Date.now(), payload });
-          return payload;
-        })
-        .finally(() => GFW_LAST_SEEN_INFLIGHT.delete(mmsi));
-      GFW_LAST_SEEN_INFLIGHT.set(mmsi, load);
-    }
-    res.json(await load);
+    res.json(await gfwLastSeen(mmsi));
   } catch (e: any) {
     const detail =
       e?.response?.data?.messages?.[0]?.detail || e?.response?.data?.error || e?.message || String(e);
@@ -3287,6 +3319,12 @@ app.listen(PORT, () => {
 
   // File-backed area alerts — runs without an open browser (email if SMTP configured)
   // Ships lingering over cables and pipelines: checked every minute (fixes older than 30 min skipped)
+  // Research ships' last GFW positions for the map, kept fresh whether or not anyone looks
+  if (GFW_API_TOKEN) {
+    void refreshResearchLastSeen();
+    setInterval(() => void refreshResearchLastSeen(), GFW_LAST_SEEN_TTL_MS + 60_000);
+  }
+
   setInterval(() => {
     getLivePositionsList()
       .then((list) => {

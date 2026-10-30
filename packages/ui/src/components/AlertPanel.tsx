@@ -154,6 +154,8 @@ export default function AlertPanel({
         return;
       }
       if (cancelled) return;
+      // An old Global Fishing Watch position is not a ship in the area now
+      positions = positions.filter((p) => !p?.lastSeenOnly);
 
       let changed = false;
       const next: AreaAlertRule[] = [];

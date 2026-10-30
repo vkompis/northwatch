@@ -8,6 +8,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aisstream: 'AISStream',
   barentswatch: 'BarentsWatch',
   'aisstream+bw': 'AISStream + BarentsWatch',
+  gfw: 'Global Fishing Watch (last known position, not live)',
 };
 
 function ago(iso: string | null): string {
@@ -257,7 +258,7 @@ export default function VesselDossier({
     ['Destination', v.destination],
     ['ETA', v.eta],
     ['Position', hasPos ? formatLatLonDm(v.lat as number, v.lon as number) : null],
-    ['Latest signal', latestSignal ? `${ago(v.timestamp)} · ${latestSignal}` : null],
+    ['Latest signal', v.lastSeenOnly ? 'Not heard on live AIS' : latestSignal ? `${ago(v.timestamp)} · ${latestSignal}` : null],
   ];
 
   return (
@@ -350,7 +351,7 @@ export default function VesselDossier({
         ))}
       </dl>
 
-      {isRussianResearchVessel(v.mmsi) && <GfwLastSeenSection data={gfwLastSeen} aisTime={v.timestamp} />}
+      {isRussianResearchVessel(v.mmsi) && <GfwLastSeenSection data={gfwLastSeen} aisTime={v.lastSeenOnly ? null : v.timestamp} />}
 
       <h3 className="dossier-h">Lists</h3>
       {!sanctions ? (

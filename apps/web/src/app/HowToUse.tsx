@@ -1,7 +1,7 @@
 'use client';
 
 import { HEADER_COLORS } from '@svalmap/ui';
-import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, StarMarker, TriangleMarker, WarningMarker } from './LayerRow';
+import { LastSeenMarker, MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, StarMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
 /** The "How to use" panel: what each part of the map shows, and what it cannot tell you. */
 export default function HowToUse() {
@@ -33,6 +33,10 @@ export default function HowToUse() {
         </li>
         <li>
           <SpoofMarker /> Possible AIS spoofing
+        </li>
+        <li>
+          <LastSeenMarker /> Russian research ship's last known position, from Global Fishing Watch.
+          Not live: it can be weeks old, and the label shows the date
         </li>
         <li>
           <StarMarker /> On your watchlist

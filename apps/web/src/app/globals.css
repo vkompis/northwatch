@@ -1238,6 +1238,9 @@ body {
 .svalmap-ship-hover .ssh-badge-spoof {
   color: #f0abfc;
 }
+.svalmap-ship-hover .ssh-badge-lastseen {
+  color: #f0abfc;
+}
 
 .svalmap-ring-hover-popup .maplibregl-popup-content {
   padding: 0;

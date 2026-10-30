@@ -520,6 +520,7 @@ export default function HomePage() {
           sanctionedMaster: opts?.sanctionedMaster ? 1 : 0,
           spoofing: opts?.spoofing?.length ? 1 : 0,
           spoofingWhy: opts?.spoofing?.length ? JSON.stringify(opts.spoofing) : null,
+          lastSeenOnly: 0,
           military: category === 'military' ? 1 : 0,
           research: category === 'research' ? 1 : 0,
           country: country.name,
@@ -1868,6 +1869,10 @@ export default function HomePage() {
                   <div className="item">
                     <img className="legend-icon" src="/markers/Circles/Researchcircle.svg" alt="" />
                     Research
+                  </div>
+                  <div className="item">
+                    <img className="legend-icon" src="/markers/Circles/lastseenring.svg" alt="" />
+                    Research, last known position
                   </div>
                 </div>
                 <div className="row">

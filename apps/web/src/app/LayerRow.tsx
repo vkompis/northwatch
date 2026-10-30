@@ -76,6 +76,15 @@ export function SpoofMarker() {
   );
 }
 
+/** Hollow ring for a research ship's last known position (public/markers/Circles/lastseenring.svg). */
+export function LastSeenMarker() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 64 64" aria-hidden="true">
+      <circle cx="32" cy="32" r="22" fill="none" stroke="#d946ef" strokeWidth="10" />
+    </svg>
+  );
+}
+
 export function DotMarker({ color }: { color: string }) {
   return (
     <svg width="12" height="12" viewBox="-6 -6 12 12" aria-hidden="true">

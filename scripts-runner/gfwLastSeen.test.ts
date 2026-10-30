@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
-import { identitiesForMmsi, latestDatedPosition } from './gfwLastSeen';
+import { identitiesForMmsi, latestDatedPosition, recentEnoughForMap } from './gfwLastSeen';
 
 const MMSI = '273546520';
+
+// Only recent positions are drawn on the map
+{
+  const now = Date.parse('2026-10-30T00:00:00Z');
+  assert.equal(recentEnoughForMap('2026-10-26T21:59:00Z', now), true);
+  assert.equal(recentEnoughForMap('2026-08-02T00:00:00Z', now), true);
+  assert.equal(recentEnoughForMap('2026-07-31T00:00:00Z', now), false);
+  assert.equal(recentEnoughForMap('2025-01-16T16:59:42Z', now), false);
+  assert.equal(recentEnoughForMap('not a date', now), false);
+}
 
 // Yantar has three named ids over the years; the newest message date is kept
 {

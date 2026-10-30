@@ -54,6 +54,8 @@ export type VesselFeatureProps = {
   spoofing: number;
   /** JSON list of { kind, text, at } from the server, or null */
   spoofingWhy: string | null;
+  /** 1 when this is a research ship's last Global Fishing Watch position, not live AIS */
+  lastSeenOnly: number;
   military: number;
   research: number;
   country: string;
@@ -166,6 +168,7 @@ const MARKER_IMAGES: { name: string; url: string }[] = [
   { name: 'WatchStar', url: '/markers/Circles/watchstar.svg' },
   { name: 'MasterBadge', url: '/markers/Circles/masterbadge.svg' },
   { name: 'SpoofRing', url: '/markers/Circles/spoofring.svg' },
+  { name: 'LastSeenRing', url: '/markers/Circles/lastseenring.svg' },
   { name: 'Norwaytriangle', url: '/markers/Countries/Norwaytriangle.svg' },
   { name: 'Russiatriangle', url: '/markers/Countries/Russiatriangle.svg' },
   { name: 'EUtriangle', url: '/markers/Countries/EUtriangle.svg' },
@@ -175,9 +178,13 @@ const MARKER_IMAGES: { name: string; url: string }[] = [
   { name: 'Researchtriangle', url: '/markers/Countries/Researchtriangle.svg' },
 ];
 
+const IS_LAST_SEEN: any = ['==', ['get', 'lastSeenOnly'], 1];
+
 function iconForCategoryCircle() {
   return [
     'case',
+    IS_LAST_SEEN,
+    'LastSeenRing',
     ['==', ['get', 'category'], 'research'],
     'Researchcircle',
     ['==', ['get', 'category'], 'military'],
@@ -197,6 +204,8 @@ function iconForCategoryCircle() {
 function iconForCategoryTriangle() {
   return [
     'case',
+    IS_LAST_SEEN,
+    'LastSeenRing',
     ['==', ['get', 'category'], 'research'],
     'Researchtriangle',
     ['==', ['get', 'category'], 'military'],
@@ -314,10 +323,14 @@ function toFeature(v: any) {
       ? null
       : Number(headingRaw);
 
+  const lastSeenOnly = v.lastSeenOnly === true || v.lastSeenOnly === 1;
+  // The date on the map label keeps an old position from reading as a live one
+  const lastSeenDay = lastSeenOnly && v.timestamp ? new Date(v.timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+
   const props: VesselFeatureProps = {
     mmsi,
     name,
-    label: name || `MMSI ${mmsi}`,
+    label: `${name || `MMSI ${mmsi}`}${lastSeenDay ? ` · ${lastSeenDay}` : ''}`,
     category,
     flagCountry,
     shipClass,
@@ -336,6 +349,7 @@ function toFeature(v: any) {
     sanctionedMaster: sanctionedMaster ? 1 : 0,
     spoofing: spoofingWhy ? 1 : 0,
     spoofingWhy,
+    lastSeenOnly: lastSeenOnly ? 1 : 0,
     military: category === 'military' ? 1 : 0,
     research: category === 'research' ? 1 : 0,
     country: country.name,
@@ -543,6 +557,7 @@ export default function VesselLayer({
         shadowfleet: Number(p.shadowfleet) ? 1 : 0,
         sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
         spoofing: Number(p.spoofing) ? 1 : 0,
+        lastSeenOnly: Number(p.lastSeenOnly) ? 1 : 0,
       });
 
       if (!hoverPopup) {
@@ -591,22 +606,29 @@ export default function VesselLayer({
       6.8,
       0,
     ];
+    // A last known position is hollow: the outline of a dot with nothing inside
+    const dotStroke: any = ['case', IS_LAST_SEEN, 2, 0];
     const dotColor: any = [
-      'match',
-      ['get', 'category'],
-      'norway',
-      HEADER_COLORS.norway,
-      'russia',
-      HEADER_COLORS.russia,
-      'eu',
-      HEADER_COLORS.eu,
-      'china',
-      HEADER_COLORS.china,
-      'military',
-      HEADER_COLORS.military,
-      'research',
-      HEADER_COLORS.research,
-      HEADER_COLORS.rest,
+      'case',
+      IS_LAST_SEEN,
+      'rgba(0, 0, 0, 0)',
+      [
+        'match',
+        ['get', 'category'],
+        'norway',
+        HEADER_COLORS.norway,
+        'russia',
+        HEADER_COLORS.russia,
+        'eu',
+        HEADER_COLORS.eu,
+        'china',
+        HEADER_COLORS.china,
+        'military',
+        HEADER_COLORS.military,
+        'research',
+        HEADER_COLORS.research,
+        HEADER_COLORS.rest,
+      ],
     ];
     // Marker icons: fade/grow in from z4.7 over ~2 zoom levels
     const circleSize: any = [
@@ -1186,6 +1208,9 @@ export default function VesselLayer({
       if (map.getLayer('vessels-dot')) {
         map.setPaintProperty('vessels-dot', 'circle-radius', dotRadius);
         map.setPaintProperty('vessels-dot', 'circle-color', dotColor);
+        map.setPaintProperty('vessels-dot', 'circle-stroke-color', HEADER_COLORS.research);
+        map.setPaintProperty('vessels-dot', 'circle-stroke-opacity', dotOpacity);
+        map.setPaintProperty('vessels-dot', 'circle-stroke-width', dotStroke);
         map.setPaintProperty('vessels-dot', 'circle-opacity', dotOpacity);
         map.setLayerZoomRange('vessels-dot', 0, 7.2);
       }
@@ -1245,7 +1270,9 @@ export default function VesselLayer({
             'circle-radius': dotRadius,
             'circle-color': dotColor,
             'circle-opacity': dotOpacity,
-            'circle-stroke-width': 0,
+            'circle-stroke-color': HEADER_COLORS.research,
+            'circle-stroke-opacity': dotOpacity,
+            'circle-stroke-width': dotStroke,
           },
         });
       }
@@ -1501,6 +1528,7 @@ export default function VesselLayer({
             sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
             spoofing: Number(p.spoofing) ? 1 : 0,
             spoofingWhy: strOrNull(p.spoofingWhy),
+            lastSeenOnly: Number(p.lastSeenOnly) ? 1 : 0,
             military: Number(p.military) ? 1 : 0,
             research: Number(p.research) ? 1 : 0,
             country: strOrEmpty(p.country) || 'Unknown',

@@ -56,7 +56,7 @@ function sourceLabel(source: string | null | undefined): string {
   if (!s) return '';
   if (s.includes('aisstream')) return 'AISStream';
   if (s.includes('barents') || s.includes('kyst')) return 'coastal station';
-  if (s.includes('gfw')) return 'GFW';
+  if (s.includes('gfw')) return 'Global Fishing Watch';
   return source as string;
 }
 
@@ -80,6 +80,7 @@ export type VesselHoverInput = {
   shadowfleet?: number | boolean | null;
   sanctionedMaster?: number | boolean | null;
   spoofing?: number | boolean | null;
+  lastSeenOnly?: number | boolean | null;
 };
 
 function isFlagOn(v: number | boolean | string | null | undefined): boolean {
@@ -124,6 +125,7 @@ export function buildVesselHoverHtml(p: VesselHoverInput): string {
   const shadow = isFlagOn(p.shadowfleet);
   const master = !sanctioned && isFlagOn(p.sanctionedMaster);
   const spoofing = isFlagOn(p.spoofing);
+  const lastSeenOnly = isFlagOn(p.lastSeenOnly);
 
   const markerBg =
     cat === 'rest' ? 'rgba(15,23,42,0.9)' : accent;
@@ -148,6 +150,11 @@ export function buildVesselHoverHtml(p: VesselHoverInput): string {
       ? `<div class="ssh-badge ssh-badge-spoof">` +
         `<img src="/markers/Circles/spoofring.svg" alt="" width="13" height="13" />` +
         `<span>Possible AIS spoofing</span></div>`
+      : '') +
+    (lastSeenOnly
+      ? `<div class="ssh-badge ssh-badge-lastseen">` +
+        `<img src="/markers/Circles/lastseenring.svg" alt="" width="13" height="13" />` +
+        `<span>Last known position, not live</span></div>`
       : '');
 
   return (
