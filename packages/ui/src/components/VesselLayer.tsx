@@ -554,7 +554,7 @@ export default function VesselLayer({
         sanctioned: Number(p.sanctioned) ? 1 : 0,
         shadowfleet: Number(p.shadowfleet) ? 1 : 0,
         sanctionedMaster: Number(p.sanctionedMaster) ? 1 : 0,
-        spoofing: Number(p.spoofing) ? 1 : 0,
+        spoofing: spoofShown() && Number(p.spoofing) ? 1 : 0,
         lastSeenOnly: Number(p.lastSeenOnly) ? 1 : 0,
       });
       return { html, lon, lat };
@@ -745,6 +745,10 @@ export default function VesselLayer({
     const watchFilter = (): any => ['in', ['get', 'mmsi'], ['literal', [...watchlistRef.current]]];
     // Dashed ring around the ship itself: its position may not be real
     const spoofSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.55, 6, 0.7, 10, 0.95];
+    // The ring and the card's spoofing line only while "Possible AIS spoofing" is ticked:
+    // the evidence is often one bad value, too thin to mark ships by default
+    const spoofShown = () => !!filtersRef.current?.spoofing;
+    const spoofOpacity = (): any => (spoofShown() ? ['case', ['==', ['get', 'spoofing'], 1], 1, 0] : 0);
 
     function setLayersVisible(on: boolean) {
       const v = on ? 'visible' : 'none';
@@ -1267,6 +1271,7 @@ export default function VesselLayer({
         src.setData({ type: 'FeatureCollection', features });
       }
       if (map.getLayer('watch-indicator')) map.setFilter('watch-indicator', watchFilter());
+      if (map.getLayer('spoof-indicator')) map.setPaintProperty('spoof-indicator', 'icon-opacity', spoofOpacity());
       emitStatus({ vesselCount: features.length });
     }
     applyFilterRef.current = applyFeatureFilter;
@@ -1502,7 +1507,7 @@ export default function VesselLayer({
             'icon-anchor': 'center',
           },
           paint: {
-            'icon-opacity': ['case', ['==', ['get', 'spoofing'], 1], 1, 0],
+            'icon-opacity': spoofOpacity(),
           },
         });
       }
