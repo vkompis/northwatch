@@ -301,9 +301,11 @@ export default function HomePage() {
       if (typeof url.ships === 'boolean') setShipsVisible(url.ships);
       if (url.trackDays) setTrackDays(url.trackDays);
       // A link's filters win over saved ones, first visit included, so a shared
-      // ?filter= link opens as it was sent
+      // ?filter= link opens as it was sent: with the ships showing, even for a
+      // visitor who last turned them off (unless the link itself says ships=0)
       if (url.filters?.length) {
         setVesselFilters(vesselFiltersFromUrlTokens(url.filters));
+        if (url.ships !== false) setShipsVisible(true);
       }
       if (url.navActive) {
         setOverlays((o) => ({ ...o, navwarnings: true }));
