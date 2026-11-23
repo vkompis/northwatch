@@ -673,10 +673,32 @@ export default function VesselLayer({
       8,
       0.93,
     ];
-    const badgeTranslate: any = [0, -24];
+    // Badge offsets follow the marker size: zoomed out a ship is a dot a few pixels wide,
+    // and a fixed offset made for the triangles left the badges far from it
+    const badgeTranslate: any = [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      4.7,
+      ['literal', [0, -9]],
+      6.8,
+      ['literal', [0, -18]],
+      8,
+      ['literal', [0, -24]],
+    ];
     // Watchlist star sits up and to the right, clear of the sanction / shadow badge above
-    const watchSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.6, 8, 0.8];
-    const watchTranslate: any = [17, -10];
+    const watchSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.42, 6.8, 0.6, 8, 0.8];
+    const watchTranslate: any = [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      4.7,
+      ['literal', [6, -5]],
+      6.8,
+      ['literal', [12, -8]],
+      8,
+      ['literal', [17, -10]],
+    ];
     const watchFilter = (): any => ['in', ['get', 'mmsi'], ['literal', [...watchlistRef.current]]];
     // Dashed ring around the ship itself: its position may not be real
     const spoofSize: any = ['interpolate', ['linear'], ['zoom'], 2, 0.55, 6, 0.7, 10, 0.95];
