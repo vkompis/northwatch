@@ -84,32 +84,42 @@ jobs:
             data/source/overlays/ice-edge.meta.json
           key: ice-edge-${{ github.run_id }}
 
-      # GUR's ship lists give the dossiers direct links to each ship's GUR page. Reading
-      # them is a slow crawl, so it runs at most daily and the result is kept between runs.
+      # Sanctions, GUR and FleetLeaks lists: refreshed at most daily (FleetLeaks weekly) and
+      # kept between runs, instead of the API re-reading them on every start. GUR's lists
+      # also give the dossiers direct links to each ship's GUR page.
       - uses: actions/cache/restore@v6
         with:
           path: |
+            data/source/eu-designated-vessels.csv
+            data/source/eu-designated-vessels.meta.json
+            data/source/opensanctions-vessels.csv
             data/source/gur-vessels.csv
             data/source/gur-captains.csv
             data/source/gur-vessels.meta.json
-          key: gur-${{ github.run_id }}
-          restore-keys: gur-
+            data/source/fleetleaks-vessels.json
+            data/cache/list-attempts.json
+          key: lists-${{ github.run_id }}
+          restore-keys: lists-
 
-      - name: Update GUR lists
-        id: gur
+      - name: Update ship lists
         working-directory: scripts-runner
-        # Without them the map still works; GUR links fall back to a search
+        # A list that fails keeps its older copy; the map still works
         continue-on-error: true
-        run: npx tsx updateGurIfStale.ts
+        run: npx tsx updateListsIfStale.ts
 
       - uses: actions/cache/save@v6
-        if: ${{ steps.gur.outcome == 'success' && hashFiles('data/source/gur-vessels.csv') != '' }}
+        if: ${{ !cancelled() }}
         with:
           path: |
+            data/source/eu-designated-vessels.csv
+            data/source/eu-designated-vessels.meta.json
+            data/source/opensanctions-vessels.csv
             data/source/gur-vessels.csv
             data/source/gur-captains.csv
             data/source/gur-vessels.meta.json
-          key: gur-${{ github.run_id }}
+            data/source/fleetleaks-vessels.json
+            data/cache/list-attempts.json
+          key: lists-${{ github.run_id }}
 
       # Ships seen in the last runs, so each snapshot is not limited to a few minutes of AIS
       - uses: actions/cache/restore@v6

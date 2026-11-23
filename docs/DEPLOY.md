@@ -50,7 +50,9 @@ pnpm --filter @svalmap/web start
 ## GitHub Pages snapshot
 `.github/workflows/pages.yml` publishes a static copy of the map to GitHub Pages every 30 minutes, on each push to `main`, and when run by hand. Each run starts the API, collects data for about three minutes, saves the responses with `scripts-runner/writeSiteSnapshot.ts`, and builds the web app with `NEXT_PUBLIC_SNAPSHOT=1`. Visitors reload the page for newer data.
 
-Vessel search, tracks, sanctions lookups and area alerts need the live API, so the snapshot hides them.
+Vessel search, tracks and area alerts need the live API, so the snapshot hides them. The dossier's list entries are saved for every flagged ship.
+
+The sanctions and GUR lists are refreshed at most once a day and FleetLeaks once a week (`scripts-runner/updateListsIfStale.ts`), kept in the Actions cache between runs.
 
 Setup, once:
 - Add the repository secrets `AISSTREAM_API_KEY`, `BW_CLIENT_ID`, `BW_CLIENT_SECRET` and `GFW_API_TOKEN`.
