@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { SpoofReason, VesselFeatureProps } from '@svalmap/ui';
 import {
   BASE_PATH,
@@ -117,6 +118,171 @@ function againstAis(gfwTime: string, aisTime: string | null): { older: boolean; 
   return gfw < ais
     ? { older: true, text: `Older than the AIS position above by ${span(ais - gfw)}. Go by the AIS position.` }
     : { older: false, text: `Newer than the AIS position above by ${span(gfw - ais)}.` };
+}
+
+/*
+ * List entries, one block per kind of list. A sanctioned ship can have a dozen entries
+ * (OpenSanctions has one per programme), so each block shows a line per programme or list,
+ * merges repeats, and gives the shared "listed as / matched on" line once.
+ */
+type ListGroupId = 'sanction' | 'gur' | 'master' | 'fleetleaks';
+const LIST_GROUP: Record<Listing['kind'], ListGroupId> = {
+  sanction: 'sanction',
+  shadow: 'gur',
+  gur: 'gur',
+  master: 'master',
+  fleetleaks: 'fleetleaks',
+};
+const LIST_GROUP_LABEL: Record<ListGroupId, string> = {
+  sanction: 'Sanctions',
+  gur: 'Ukraine GUR',
+  master: 'Sanctioned master',
+  fleetleaks: 'FleetLeaks',
+};
+const LIST_GROUP_ORDER: ListGroupId[] = ['sanction', 'gur', 'master', 'fleetleaks'];
+
+/** Who imposed a sanction, from the programme name: "UK FCDO" → "UK", "EU Sanctions Map" → "EU" */
+function authorityOf(label: string): string {
+  const m = label.match(/^(EU|UK|US|UN|Canada|Australia|New Zealand|Switzerland|Japan|Norway|Ukraine)\b/i);
+  if (m) return m[1].length <= 2 ? m[1].toUpperCase() : m[1];
+  return /^Older local/i.test(label) ? 'local list' : label.split(' ')[0];
+}
+
+/** One line in a block: what the list calls it, minus what the block heading already says */
+function rowLabel(l: Listing): string {
+  if (l.kind === 'sanction' && l.source === 'OpenSanctions' && l.programmes.length) return l.programmes.join(' · ');
+  if (l.kind === 'master') return 'Ukraine GUR captain list';
+  const title = l.source === 'GUR' ? l.title.replace(/^Ukraine GUR · | · Ukraine GUR$/g, '') : l.title;
+  return [title, ...l.programmes].join(' · ');
+}
+
+const normName = (s: string | null) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+function ListingGroups({
+  listings,
+  vessel,
+  sanctioned,
+}: {
+  listings: Listing[];
+  vessel: VesselFeatureProps;
+  sanctioned: boolean;
+}) {
+  const groups = LIST_GROUP_ORDER.map((id) => ({ id, entries: listings.filter((l) => LIST_GROUP[l.kind] === id) })).filter(
+    (g) => g.entries.length > 0
+  );
+  const [shown, setShown] = useState<ListGroupId | 'all'>('all');
+  const visible = groups.filter((g) => shown === 'all' || g.id === shown);
+
+  // "Listed as … · IMO … · matched on …" for one block: the name most entries give
+  const metaOf = (entries: Listing[]) => {
+    const counts = new Map<string, number>();
+    for (const l of entries) if (l.listedName) counts.set(normName(l.listedName), (counts.get(normName(l.listedName)) || 0) + 1);
+    const key = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+    const name = entries.find((l) => normName(l.listedName) === key)?.listedName || null;
+    const imo = entries.find((l) => l.listedImo)?.listedImo || null;
+    const matchedBy = [...new Set(entries.flatMap((l) => l.matchedBy))].sort();
+    const text = [name && `Listed as ${name}`, imo && `IMO ${imo}`, `matched on ${matchedBy.map((m) => m.toUpperCase()).join(' + ')}`]
+      .filter(Boolean)
+      .join(' · ');
+    return { key, text, same: `${key}|${imo}|${matchedBy.join('+')}` };
+  };
+  // Said once for the whole list when every block would say the same
+  const sharedMeta = new Set(groups.map((g) => metaOf(g.entries).same)).size === 1 ? metaOf(groups[0].entries).text : null;
+
+  return (
+    <>
+      {groups.length > 1 && (
+        <div className="listing-filter" role="group" aria-label="Show lists">
+          {(['all', ...groups.map((g) => g.id)] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={shown === id ? 'on' : ''}
+              aria-pressed={shown === id}
+              onClick={() => setShown(id)}
+            >
+              {id === 'all' ? 'All' : LIST_GROUP_LABEL[id]}
+            </button>
+          ))}
+        </div>
+      )}
+      {sharedMeta && <div className="listing-meta listing-shared">{sharedMeta}</div>}
+      <ul className="dossier-listings">
+        {visible.map(({ id, entries }) => {
+          // Entries listed under another name than most say so on their own line
+          const meta = metaOf(entries);
+          const commonKey = meta.key;
+
+          const rows: { label: string; since: string | null; aside: string | null; url: string | null; urlLabel: string | null; n: number }[] = [];
+          for (const l of entries) {
+            const label = rowLabel(l);
+            const aside =
+              [
+                l.listedName && normName(l.listedName) !== commonKey && `listed as ${l.listedName}`,
+                l.listedMmsi && `MMSI ${l.listedMmsi}`,
+              ]
+                .filter(Boolean)
+                .join(', ') || null;
+            const same = rows.find((r) => r.label === label && r.aside === aside);
+            if (same) same.n += 1;
+            else rows.push({ label, since: l.since, aside, url: l.url, urlLabel: l.urlLabel, n: 1 });
+          }
+          const details = [...new Set(entries.map((l) => l.detail).filter((d): d is string => !!d))];
+          const authorities =
+            id === 'sanction' ? [...new Set(entries.map((l) => authorityOf(rowLabel(l))))].join(', ') : null;
+          const marker = entries.some((l) => l.kind === 'shadow') ? 'shadow' : entries[0].kind;
+
+          return (
+            <li key={id} className={`dossier-listing ${id}`}>
+              <span className="listing-marker">
+                <ListingMarker kind={marker} />
+              </span>
+              <div>
+                <div className="listing-title">
+                  {LIST_GROUP_LABEL[id]}
+                  {authorities && <span className="listing-sub"> · {authorities}</span>}
+                </div>
+                <ul className="listing-rows">
+                  {rows.map((r, i) => (
+                    <li key={i}>
+                      <span>
+                        {r.label}
+                        {r.n > 1 && (id === 'master' ? ` · ${r.n} captains` : ` (${r.n} entries)`)}
+                        {r.since && <span className="listing-aside"> · since {r.since}</span>}
+                        {r.aside && <span className="listing-aside"> · {r.aside}</span>}
+                      </span>
+                      {r.url && (
+                        <a className="listing-link" href={r.url} {...externalLink}>
+                          {r.urlLabel || 'Open entry'} ↗
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {details.map((d) => (
+                  <div key={d} className="listing-detail">
+                    {id === 'master' ? `Master: ${d}` : d}
+                  </div>
+                ))}
+                {!sharedMeta && <div className="listing-meta">{meta.text}</div>}
+                {id === 'fleetleaks' && !sanctioned && entries.some((l) => !mmsiOnlyMismatch(l, vessel)) && (
+                  <div className="listing-warn">
+                    FleetLeaks lists this ship as sanctioned, but it is not on the lists NorthWatch reads.
+                    Check the official list FleetLeaks names before relying on it.
+                  </div>
+                )}
+                {entries.some((l) => mmsiOnlyMismatch(l, vessel)) && (
+                  <div className="listing-warn">
+                    Listed under another name or IMO — this MMSI may have been reused. Check the entry before relying on it.
+                  </div>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
 }
 
 function GfwLastSeenSection({ data, aisTime }: { data: GfwLastSeen | null; aisTime: string | null }) {
@@ -371,47 +537,7 @@ export default function VesselDossier({
       ) : listings.length === 0 ? (
         <p className="dossier-note">Not on the EU, OpenSanctions, Ukraine GUR or FleetLeaks lists.</p>
       ) : (
-        <ul className="dossier-listings">
-          {listings.map((l, i) => (
-            <li key={`${l.source}-${l.kind}-${i}`} className={`dossier-listing ${l.kind}`}>
-              <span className="listing-marker">
-                <ListingMarker kind={l.kind} />
-              </span>
-              <div>
-                <div className="listing-title">{l.title}</div>
-                {l.programmes.length > 0 && <div className="listing-programmes">{l.programmes.join(' · ')}</div>}
-                {l.detail && <div className="listing-detail">{l.kind === 'master' ? `Master: ${l.detail}` : l.detail}</div>}
-                <div className="listing-meta">
-                  {[
-                    l.listedName && `Listed as ${l.listedName}`,
-                    l.listedImo && `IMO ${l.listedImo}`,
-                    l.listedMmsi && `MMSI ${l.listedMmsi}`,
-                    l.since && `since ${l.since}`,
-                    `matched on ${l.matchedBy.map((m) => m.toUpperCase()).join(' + ')}`,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </div>
-                {l.kind === 'fleetleaks' && !sanctioned && !mmsiOnlyMismatch(l, v) && (
-                  <div className="listing-warn">
-                    FleetLeaks lists this ship as sanctioned, but it is not on the lists NorthWatch reads.
-                    Check the official list FleetLeaks names before relying on it.
-                  </div>
-                )}
-                {mmsiOnlyMismatch(l, v) && (
-                  <div className="listing-warn">
-                    Listed under another name or IMO — this MMSI may have been reused. Check the entry before relying on it.
-                  </div>
-                )}
-                {l.url && (
-                  <a className="dossier-link" href={l.url} {...externalLink}>
-                    {l.urlLabel || 'Open entry'} ↗
-                  </a>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <ListingGroups key={v.mmsi} listings={listings} vessel={v} sanctioned={sanctioned} />
       )}
 
       <h3 className="dossier-h">Look up</h3>

@@ -1781,10 +1781,68 @@ body {
 .listing-title {
   font-weight: 600;
 }
-.listing-programmes,
 .listing-detail {
   margin-top: 2px;
   color: var(--sv-ink);
+}
+/* Show one kind of list at a time; same underlined tabs as the Ships quick views */
+.listing-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: -2px 0 10px;
+}
+.listing-filter button {
+  padding: 3px 0;
+  border: 0;
+  border-bottom: 1.5px solid transparent;
+  background: none;
+  color: var(--sv-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.listing-filter button:hover {
+  color: var(--sv-ink);
+}
+.listing-filter button.on {
+  border-bottom-color: var(--sv-accent);
+  color: var(--sv-ink);
+  font-weight: 500;
+}
+.listing-sub {
+  font-weight: 400;
+  color: var(--sv-muted);
+}
+/* One line per programme or list: name on the left, its link on the right */
+.listing-rows {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+.listing-rows li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 10px;
+  padding: 2px 0;
+}
+/* The name gets the room; a long link label drops below it instead of squeezing it */
+.listing-rows li > span {
+  flex: 1 1 14em;
+}
+.listing-shared {
+  margin: 0 0 10px;
+}
+.listing-aside {
+  color: var(--sv-muted);
+}
+.listing-link {
+  flex: none;
+  color: var(--sv-accent);
+  font-size: 12px;
+  white-space: nowrap;
 }
 .listing-meta {
   margin-top: 3px;
