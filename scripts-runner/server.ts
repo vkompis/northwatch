@@ -530,7 +530,9 @@ async function getBarentsWatchAccessToken(): Promise<string | null> {
       return token;
     }
   } catch (e) {
-    console.warn('Failed to fetch BW token:', (e as any)?.message || String(e));
+    // OAuth error code (e.g. invalid_client, invalid_scope); never echoes the credentials
+    const oauthError = (e as any)?.response?.data?.error;
+    console.warn('Failed to fetch BW token:', (e as any)?.message || String(e), oauthError ? `(${oauthError})` : '');
   }
   return null;
 }
