@@ -503,9 +503,10 @@ body {
   line-height: 1.4;
 }
 
-/* Right detail drawer / mobile bottom sheet */
+/* Right detail drawer / mobile bottom sheet. Fixed, not absolute: parked off-screen to the
+   right while closed, an absolute drawer widened the page, so phones could pan sideways. */
 #detail-drawer {
-  position: absolute;
+  position: fixed;
   top: 44px;
   right: 0;
   bottom: 0;
@@ -2354,6 +2355,8 @@ body {
     right: 0;
     width: auto;
     max-height: calc(100vh - 150px);
+    /* iOS counts the area behind its toolbar in vh; dvh keeps the last rows reachable */
+    max-height: calc(100dvh - 150px);
   }
   #detail-drawer {
     top: 112px;
@@ -2491,6 +2494,15 @@ body {
 }
 .has-timeline .zoom-readout {
   bottom: calc(146px + 15px);
+}
+/* Phones: the centred map key, once opened, covered the zoom readout and the info button;
+   keep it left of them */
+@media (max-width: 719px) {
+  #legend {
+    left: 12px;
+    transform: none;
+    max-width: calc(100vw - 150px);
+  }
 }
 @media (min-width: 720px) {
   .detail-open .zoom-readout {

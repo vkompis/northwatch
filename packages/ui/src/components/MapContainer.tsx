@@ -13,6 +13,11 @@ export const NORWAY_BOUNDS: [[number, number], [number, number]] = [
   [-70, 54],
   [40, 80],
 ];
+/** A phone held upright fits the box above only at world zoom; show Norway, Svalbard and the Barents Sea */
+const NORWAY_BOUNDS_NARROW: [[number, number], [number, number]] = [
+  [0, 57],
+  [40, 81],
+];
 
 type Props = {
   center: { latitude: number; longitude: number };
@@ -126,7 +131,8 @@ export default function MapContainer({
           canvasEl.style.height = `${wrapEl.clientHeight}px`;
         }
         m.resize();
-        m.fitBounds(NORWAY_BOUNDS, {
+        const narrow = (wrapEl?.clientWidth ?? window.innerWidth) < 600;
+        m.fitBounds(narrow ? NORWAY_BOUNDS_NARROW : NORWAY_BOUNDS, {
           padding: { top: 48, bottom: 96, left: 48, right: 48 },
           duration: 0,
           maxZoom: 3.25,
