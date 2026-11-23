@@ -60,6 +60,12 @@ const POSITION_TYPES = new Set([
 const STATIC_TYPES = new Set(['ShipStaticData', 'StaticDataReport']);
 const SUBSCRIBED_TYPES = [...POSITION_TYPES, ...STATIC_TYPES];
 const STREAM_URL = 'wss://stream.aisstream.io/v0/stream';
+/**
+ * How long the WebSocket handshake may take. AISStream's 3-second limit runs from the
+ * socket opening, and the subscription goes out on open, so this only guards a hung
+ * handshake — which AISStream has been seen to take ~30 s to finish.
+ */
+const OPEN_TIMEOUT_MS = 60 * 1000;
 
 const STALE_MS = 45 * 60 * 1000;
 const SWEEP_MS = 60 * 1000;
@@ -318,13 +324,13 @@ function connect(apiKey: string) {
   socket = ws;
 
   const subscribeTimer = setTimeout(() => {
-    console.warn('[aisstream] subscription not sent in time — closing');
+    console.warn(`[aisstream] not open after ${OPEN_TIMEOUT_MS / 1000}s — closing`);
     try {
       ws.terminate();
     } catch {
       /* ignore */
     }
-  }, 2800);
+  }, OPEN_TIMEOUT_MS);
 
   ws.on('open', () => {
     clearTimeout(subscribeTimer);
@@ -448,7 +454,7 @@ function connectWorldwide(apiKey: string) {
     } catch {
       /* ignore */
     }
-  }, 2800);
+  }, OPEN_TIMEOUT_MS);
   ws.on('open', () => {
     clearTimeout(subscribeTimer);
     worldConnected = true;
