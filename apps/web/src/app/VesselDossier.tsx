@@ -364,7 +364,7 @@ export default function VesselDossier({
       )}
 
       <h3 className="dossier-h">Lists</h3>
-      {SNAPSHOT_MODE ? (
+      {SNAPSHOT_MODE && !sanctions ? (
         <p className="dossier-note">List entries are not in this snapshot. The badges above show which lists the ship is on.</p>
       ) : !sanctions ? (
         <p className="dossier-note">Checking the lists…</p>

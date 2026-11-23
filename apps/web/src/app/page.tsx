@@ -61,6 +61,15 @@ import DarkLeads from './DarkLeads';
 import HowToUse from './HowToUse';
 
 /** Copernicus Browser on Sentinel-2 true colour over the current map view (its own default date: latest). */
+/** Snapshot list entries by MMSI, read once and shared by every dossier opened */
+let snapshotLookups: Promise<Record<string, any>> | null = null;
+function loadSnapshotLookups(apiBase: string): Promise<Record<string, any>> {
+  snapshotLookups ??= fetch(`${apiBase}/api/sanctions/lookups`)
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}));
+  return snapshotLookups;
+}
+
 function copernicusAreaUrl(view: MapView | null): string {
   const params = new URLSearchParams({
     themeId: 'DEFAULT-THEME',
@@ -634,10 +643,16 @@ export default function HomePage() {
   useEffect(() => {
     // Clear first so the previous vessel's "Yes (list hit)" never shows on the new one
     setSanctionsInfo(null);
-    if (SNAPSHOT_MODE || (!dossierMmsi && !dossierImo)) return;
+    if (!dossierMmsi && !dossierImo) return;
     let cancelled = false;
     (async () => {
       try {
+        if (SNAPSHOT_MODE) {
+          // The snapshot carries the entries of every flagged ship (writeSiteSnapshot.ts)
+          const all = await loadSnapshotLookups(apiBase);
+          if (!cancelled) setSanctionsInfo((dossierMmsi && all[dossierMmsi]) || null);
+          return;
+        }
         const q = new URLSearchParams();
         if (dossierMmsi) q.set('mmsi', dossierMmsi);
         if (dossierImo) q.set('imo', dossierImo);

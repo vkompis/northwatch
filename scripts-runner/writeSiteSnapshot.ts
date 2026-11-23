@@ -63,6 +63,7 @@ async function main() {
   console.log(`[snapshot] collecting AIS for ${collectMs / 1000}s`);
   await sleep(collectMs);
 
+  let vessels: any[] = [];
   for (const endpoint of ENDPOINTS) {
     const { status, body } = await capture(`${base}${endpoint}`);
     const file = path.join(outDir, endpoint.split('?')[0]);
@@ -70,12 +71,29 @@ async function main() {
     fs.writeFileSync(file, JSON.stringify(body));
     const size = Array.isArray(body) ? `${body.length} items` : `${JSON.stringify(body).length} bytes`;
     console.log(`[snapshot] ${endpoint} -> ${status}, ${size}`);
-    // Research ships drawn at their last GFW position are there without any AIS feed
-    if (endpoint === '/api/live-positions' && !(Array.isArray(body) && body.some((v) => !v.lastSeenOnly))) {
-      // Keep the last good site instead of publishing an empty map
-      throw new Error('no live AIS positions; check the AIS secrets');
+    if (endpoint === '/api/live-positions') {
+      // Research ships drawn at their last GFW position are there without any AIS feed
+      if (!(Array.isArray(body) && body.some((v) => !v.lastSeenOnly))) {
+        // Keep the last good site instead of publishing an empty map
+        throw new Error('no live AIS positions; check the AIS secrets');
+      }
+      vessels = body;
     }
   }
+
+  // The dossier's list entries (with links straight to each ship's GUR / OpenSanctions
+  // page) for every flagged ship, keyed by MMSI; the live API looks them up per click
+  const lookups: Record<string, any> = {};
+  for (const v of vessels.filter((v) => v.sanctioned || v.shadowfleet || v.sanctionedMaster)) {
+    const q = new URLSearchParams({ mmsi: v.mmsi, ...(v.imo ? { imo: v.imo } : {}) });
+    const { body } = await getJson(`${base}/api/sanctions/lookup?${q}`);
+    // GUR's captain list names people; keep the entry and its link, not the name
+    for (const l of body?.listings || []) if (l.kind === 'master') l.detail = null;
+    lookups[v.mmsi] = body;
+  }
+  ensureDir(path.join(outDir, 'api/sanctions'));
+  fs.writeFileSync(path.join(outDir, 'api/sanctions/lookups'), JSON.stringify(lookups));
+  console.log(`[snapshot] list entries for ${Object.keys(lookups).length} flagged ships`);
 
   fs.cpSync(dataSource('overlays'), path.join(outDir, 'overlays'), { recursive: true });
   console.log('[snapshot] copied overlays');
