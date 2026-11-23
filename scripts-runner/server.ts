@@ -2895,6 +2895,9 @@ async function fetchSarPresenceReport(
           'date-range': `${startDate},${endDate}`,
           format: 'JSON',
           'filters[0]': matched ? "matched='true'" : "matched='false'",
+          // Since GFW's pipeline v5 (Oct 2026) the matched ship's name, MMSI and flag
+          // only come back when the report is grouped by vessel
+          ...(matched ? { 'group-by': 'VESSEL_ID' } : {}),
         },
         validateStatus: (s) => s >= 200 && s < 300,
         timeout: 120000,
