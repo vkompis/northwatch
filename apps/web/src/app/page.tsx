@@ -300,20 +300,10 @@ export default function HomePage() {
       }
       if (typeof url.ships === 'boolean') setShipsVisible(url.ships);
       if (url.trackDays) setTrackDays(url.trackDays);
-      // URL filters only apply when prefs already exist for this version.
-      // On a prefs migration (no v9 key yet), drop sticky deep-link filters that
-      // were left over from the old exclusive model / mid-debug sessions.
-      if (url.filters?.length && raw) {
+      // A link's filters win over saved ones, first visit included, so a shared
+      // ?filter= link opens as it was sent
+      if (url.filters?.length) {
         setVesselFilters(vesselFiltersFromUrlTokens(url.filters));
-      } else if (url.filters?.length && !raw) {
-        writeUrlState({
-          mmsi: url.mmsi,
-          ships: url.ships,
-          trackDays: url.trackDays,
-          filters: [],
-          navActive: url.navActive,
-          nav30d: url.nav30d,
-        });
       }
       if (url.navActive) {
         setOverlays((o) => ({ ...o, navwarnings: true }));
