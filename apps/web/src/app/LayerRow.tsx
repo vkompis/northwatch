@@ -85,10 +85,11 @@ export function LastSeenMarker() {
   );
 }
 
-export function DotMarker({ color }: { color: string }) {
+/** `stroke` matches map layers drawn with an outline, which zoomed out mostly shows the outline */
+export function DotMarker({ color, stroke }: { color: string; stroke?: string }) {
   return (
     <svg width="12" height="12" viewBox="-6 -6 12 12" aria-hidden="true">
-      <circle r="4" fill={color} />
+      <circle r="4" fill={color} stroke={stroke} strokeWidth={stroke ? 1.5 : undefined} />
     </svg>
   );
 }

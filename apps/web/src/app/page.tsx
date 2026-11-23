@@ -828,7 +828,7 @@ export default function HomePage() {
             <LayerRow
               label="Port visits"
               sub="Global Fishing Watch · 30 days"
-              marker={<DotMarker color={GFW_HEADER_COLORS.port_visit} />}
+              marker={<DotMarker color={GFW_HEADER_COLORS.port_visit} stroke="#fff" />}
               checked={gfw.port}
               onChange={(on) => setGfwFlag('port', on)}
             />
