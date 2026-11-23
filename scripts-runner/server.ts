@@ -2883,8 +2883,10 @@ async function fetchSarPresenceReport(
   endDate: string,
   matched: boolean
 ): Promise<{ detections: any[]; error?: string }> {
-  try {
-    const r = await client.post(
+  const errorDetail = (e: any) =>
+    e?.response?.data?.messages?.[0]?.detail || e?.response?.data?.error || e?.message || String(e);
+  const request = (groupByVessel: boolean) =>
+    client.post(
       '/4wings/report',
       { geojson: sarZonesRequestGeometry() },
       {
@@ -2895,18 +2897,27 @@ async function fetchSarPresenceReport(
           'date-range': `${startDate},${endDate}`,
           format: 'JSON',
           'filters[0]': matched ? "matched='true'" : "matched='false'",
-          // Since GFW's pipeline v5 (Oct 2026) the matched ship's name, MMSI and flag
-          // only come back when the report is grouped by vessel
-          ...(matched ? { 'group-by': 'VESSEL_ID' } : {}),
+          ...(groupByVessel ? { 'group-by': 'VESSEL_ID' } : {}),
         },
         validateStatus: (s) => s >= 200 && s < 300,
         timeout: 120000,
       }
     );
+  try {
+    let r;
+    try {
+      // Since GFW's pipeline v5 (Oct 2026) the matched ship's name, MMSI and flag only come
+      // back when the report is grouped by vessel. GFW pauses that grouping at times, so
+      // fall back to the detections without ships rather than losing them.
+      r = await request(matched);
+    } catch (e: any) {
+      if (!matched) throw e;
+      console.warn('[gfw/detections] sar matched: no ships from GFW,', errorDetail(e));
+      r = await request(false);
+    }
     return { detections: parseSarReportEntries(r.data, matched) };
   } catch (e: any) {
-    const detail =
-      e?.response?.data?.messages?.[0]?.detail || e?.response?.data?.error || e?.message || String(e);
+    const detail = errorDetail(e);
     console.warn('[gfw/detections] sar', matched ? 'matched' : 'unmatched', detail);
     return { detections: [], error: detail };
   }
