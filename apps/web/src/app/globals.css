@@ -2592,6 +2592,12 @@ body {
   padding: 8px 36px 9px 12px;
   border-radius: 10px;
 }
+/* The open card is inside the map's layer, which sits under the map key and zoom readout,
+   so it cannot be raised above them; hide them while it is open */
+body:has(.maplibregl-compact-show) #legend,
+body:has(.maplibregl-compact-show) .zoom-readout {
+  visibility: hidden;
+}
 .svalmap-map-root .maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button {
   top: 1px;
   right: 1px;
