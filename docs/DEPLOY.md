@@ -54,6 +54,7 @@ Vessel search, tracks, sanctions lookups and area alerts need the live API, so t
 
 Setup, once:
 - Add the repository secrets `AISSTREAM_API_KEY`, `BW_CLIENT_ID`, `BW_CLIENT_SECRET` and `GFW_API_TOKEN`.
+- For the ice edge, also add `COPERNICUSMARINE_SERVICE_USERNAME` and `COPERNICUSMARINE_SERVICE_PASSWORD` (a free Copernicus Marine account). Without them the map shows the ice edge stored in the repository.
 - Set Settings → Pages → Source to "GitHub Actions".
 
 A run that collects no vessels fails, so the last good copy stays online.

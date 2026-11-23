@@ -40,6 +40,50 @@ jobs:
       - run: npm ci
         working-directory: scripts-runner
 
+      # Ice edge: Copernicus publishes it once a day, so it is fetched at most every
+      # 12 hours and carried between runs. Skipped until the Copernicus secrets are set.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            data/source/overlays/ice-edge.geojson
+            data/source/overlays/ice-edge.meta.json
+          key: ice-edge-${{ github.run_id }}
+          restore-keys: ice-edge-
+
+      - name: Check ice edge age
+        id: ice
+        env:
+          HAS_LOGIN: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME != '' }}
+        run: |
+          hours=$(python3 -c "import json, datetime as d; m = json.load(open('data/source/overlays/ice-edge.meta.json')); print(int((d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(m['generated_at'])).total_seconds() // 3600))")
+          echo "Ice edge is ${hours}h old"
+          if [ "$HAS_LOGIN" = true ] && [ "$hours" -ge 12 ]; then echo "update=true" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-python@v7
+        if: steps.ice.outputs.update == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Update ice edge
+        id: ice_update
+        if: steps.ice.outputs.update == 'true'
+        # An old ice edge is better than no map
+        continue-on-error: true
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
+        run: |
+          pip install --quiet copernicusmarine matplotlib numpy xarray python-dotenv
+          python scripts-runner/fetch_ice_edge.py
+
+      - uses: actions/cache/save@v6
+        if: steps.ice_update.outcome == 'success'
+        with:
+          path: |
+            data/source/overlays/ice-edge.geojson
+            data/source/overlays/ice-edge.meta.json
+          key: ice-edge-${{ github.run_id }}
+
       # Ships seen in the last runs, so each snapshot is not limited to a few minutes of AIS
       - uses: actions/cache/restore@v6
         with:
