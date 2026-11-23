@@ -3,8 +3,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { MapContext } from '../hooks/useMap';
+import { BASE_PATH } from '../utils/siteMode';
 
-const DEFAULT_STYLE = '/styles/svalmap-dark.json';
+const DEFAULT_STYLE = `${BASE_PATH}/styles/svalmap-dark.json`;
 const MAPTILER_KEY_PLACEHOLDER = '__MAPTILER_KEY__';
 
 /** North Atlantic monitoring extent: north of 54°N */

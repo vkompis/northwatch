@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useMap } from '../hooks/useMap';
 import { mapStyleReady } from '../utils/mapSafe';
 import type { MapTheme } from '../utils/kartverketRelief';
+import { BASE_PATH } from '../utils/siteMode';
 
 const styleCache = new Map<string, Promise<any>>();
 
@@ -26,7 +27,7 @@ function loadStyle(url: string): Promise<any> {
  */
 export default function BasemapTheme({
   theme,
-  styleUrl = (t: MapTheme) => `/styles/svalmap-${t}.json`,
+  styleUrl = (t: MapTheme) => `${BASE_PATH}/styles/svalmap-${t}.json`,
 }: {
   theme: MapTheme;
   styleUrl?: (theme: MapTheme) => string;

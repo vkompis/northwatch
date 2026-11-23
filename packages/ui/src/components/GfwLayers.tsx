@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useMap } from '../hooks/useMap';
 import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
+import { BASE_PATH } from '../utils/siteMode';
 
 export type GfwVisibility = {
   loitering: boolean;
@@ -889,8 +890,8 @@ export default function GfwLayers({
           ensureLayers();
         }
         await Promise.all([
-          loadBadgeIcon(map, 'Sanksjon', '/markers/Circles/Sanksjon.svg'),
-          loadBadgeIcon(map, 'ShadowTriangle', '/markers/Circles/shadowtriangle.svg'),
+          loadBadgeIcon(map, 'Sanksjon', `${BASE_PATH}/markers/Circles/Sanksjon.svg`),
+          loadBadgeIcon(map, 'ShadowTriangle', `${BASE_PATH}/markers/Circles/shadowtriangle.svg`),
         ]);
         // Always apply whatever we have so toggles paint immediately
         applySharedData();

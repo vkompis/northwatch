@@ -25,6 +25,7 @@ import { mapStyleReady } from '../utils/mapSafe';
 import type { MapTheme } from '../utils/kartverketRelief';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
+import { BASE_PATH, SNAPSHOT_MODE } from '../utils/siteMode';
 
 export type VesselFeatureProps = {
   mmsi: string;
@@ -156,26 +157,26 @@ function applyLabelTheme(
 }
 
 const MARKER_IMAGES: { name: string; url: string }[] = [
-  { name: 'Norwaycircle', url: '/markers/Circles/Norwaycircle.svg' },
-  { name: 'Russiacircle', url: '/markers/Circles/Russiacircle.svg' },
-  { name: 'EUcircle', url: '/markers/Circles/EUcircle.svg' },
-  { name: 'Chinacircle', url: '/markers/Circles/Chinacircle.svg' },
-  { name: 'Unknowncircle', url: '/markers/Circles/Unknowncircle.svg' },
-  { name: 'Militarycircle', url: '/markers/Circles/Militarycircle.svg' },
-  { name: 'Researchcircle', url: '/markers/Circles/Researchcircle.svg' },
-  { name: 'Sanksjon', url: '/markers/Circles/Sanksjon.svg' },
-  { name: 'ShadowTriangle', url: '/markers/Circles/shadowtriangle.svg' },
-  { name: 'WatchStar', url: '/markers/Circles/watchstar.svg' },
-  { name: 'MasterBadge', url: '/markers/Circles/masterbadge.svg' },
-  { name: 'SpoofRing', url: '/markers/Circles/spoofring.svg' },
-  { name: 'LastSeenRing', url: '/markers/Circles/lastseenring.svg' },
-  { name: 'Norwaytriangle', url: '/markers/Countries/Norwaytriangle.svg' },
-  { name: 'Russiatriangle', url: '/markers/Countries/Russiatriangle.svg' },
-  { name: 'EUtriangle', url: '/markers/Countries/EUtriangle.svg' },
-  { name: 'Chinatriangle', url: '/markers/Countries/Chinatriangle.svg' },
-  { name: 'Unknowntriangle', url: '/markers/Countries/Unknowntriangle.svg' },
-  { name: 'Militarytriangle', url: '/markers/Countries/Militarytriangle.svg' },
-  { name: 'Researchtriangle', url: '/markers/Countries/Researchtriangle.svg' },
+  { name: 'Norwaycircle', url: `${BASE_PATH}/markers/Circles/Norwaycircle.svg` },
+  { name: 'Russiacircle', url: `${BASE_PATH}/markers/Circles/Russiacircle.svg` },
+  { name: 'EUcircle', url: `${BASE_PATH}/markers/Circles/EUcircle.svg` },
+  { name: 'Chinacircle', url: `${BASE_PATH}/markers/Circles/Chinacircle.svg` },
+  { name: 'Unknowncircle', url: `${BASE_PATH}/markers/Circles/Unknowncircle.svg` },
+  { name: 'Militarycircle', url: `${BASE_PATH}/markers/Circles/Militarycircle.svg` },
+  { name: 'Researchcircle', url: `${BASE_PATH}/markers/Circles/Researchcircle.svg` },
+  { name: 'Sanksjon', url: `${BASE_PATH}/markers/Circles/Sanksjon.svg` },
+  { name: 'ShadowTriangle', url: `${BASE_PATH}/markers/Circles/shadowtriangle.svg` },
+  { name: 'WatchStar', url: `${BASE_PATH}/markers/Circles/watchstar.svg` },
+  { name: 'MasterBadge', url: `${BASE_PATH}/markers/Circles/masterbadge.svg` },
+  { name: 'SpoofRing', url: `${BASE_PATH}/markers/Circles/spoofring.svg` },
+  { name: 'LastSeenRing', url: `${BASE_PATH}/markers/Circles/lastseenring.svg` },
+  { name: 'Norwaytriangle', url: `${BASE_PATH}/markers/Countries/Norwaytriangle.svg` },
+  { name: 'Russiatriangle', url: `${BASE_PATH}/markers/Countries/Russiatriangle.svg` },
+  { name: 'EUtriangle', url: `${BASE_PATH}/markers/Countries/EUtriangle.svg` },
+  { name: 'Chinatriangle', url: `${BASE_PATH}/markers/Countries/Chinatriangle.svg` },
+  { name: 'Unknowntriangle', url: `${BASE_PATH}/markers/Countries/Unknowntriangle.svg` },
+  { name: 'Militarytriangle', url: `${BASE_PATH}/markers/Countries/Militarytriangle.svg` },
+  { name: 'Researchtriangle', url: `${BASE_PATH}/markers/Countries/Researchtriangle.svg` },
 ];
 
 const IS_LAST_SEEN: any = ['==', ['get', 'lastSeenOnly'], 1];
@@ -1097,7 +1098,8 @@ export default function VesselLayer({
     }
 
     async function showTrack(mmsi: string) {
-      if (!mmsi) return;
+      // A snapshot has no track API to ask
+      if (!mmsi || SNAPSHOT_MODE) return;
       ensureTrackLayers();
       const days = Math.max(1, Math.min(14, trackDaysRef.current || 1));
       // Always refetch when days change even for same MMSI

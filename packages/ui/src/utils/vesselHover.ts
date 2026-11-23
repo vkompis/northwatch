@@ -5,6 +5,7 @@ import {
   headerTextColor,
   type VesselCategory,
 } from './vesselCategory';
+import { BASE_PATH } from './siteMode';
 
 function esc(s: unknown): string {
   return String(s ?? '')
@@ -133,27 +134,27 @@ export function buildVesselHoverHtml(p: VesselHoverInput): string {
   const badges =
     (sanctioned
       ? `<div class="ssh-badge ssh-badge-sanction">` +
-        `<img src="/markers/Circles/Sanksjon.svg" alt="" width="14" height="11" />` +
+        `<img src="${BASE_PATH}/markers/Circles/Sanksjon.svg" alt="" width="14" height="11" />` +
         `<span>Sanctioned vessel</span></div>`
       : '') +
     (shadow
       ? `<div class="ssh-badge ssh-badge-shadow">` +
-        `<img src="/markers/Circles/shadowtriangle.svg" alt="" width="14" height="11" />` +
+        `<img src="${BASE_PATH}/markers/Circles/shadowtriangle.svg" alt="" width="14" height="11" />` +
         `<span>Russian shadow fleet</span></div>`
       : '') +
     (master
       ? `<div class="ssh-badge ssh-badge-master">` +
-        `<img src="/markers/Circles/masterbadge.svg" alt="" width="13" height="13" />` +
+        `<img src="${BASE_PATH}/markers/Circles/masterbadge.svg" alt="" width="13" height="13" />` +
         `<span>Sanctioned master</span></div>`
       : '') +
     (spoofing
       ? `<div class="ssh-badge ssh-badge-spoof">` +
-        `<img src="/markers/Circles/spoofring.svg" alt="" width="13" height="13" />` +
+        `<img src="${BASE_PATH}/markers/Circles/spoofring.svg" alt="" width="13" height="13" />` +
         `<span>Possible AIS spoofing</span></div>`
       : '') +
     (lastSeenOnly
       ? `<div class="ssh-badge ssh-badge-lastseen">` +
-        `<img src="/markers/Circles/lastseenring.svg" alt="" width="13" height="13" />` +
+        `<img src="${BASE_PATH}/markers/Circles/lastseenring.svg" alt="" width="13" height="13" />` +
         `<span>Last known position, not live</span></div>`
       : '');
 
@@ -164,7 +165,7 @@ export function buildVesselHoverHtml(p: VesselHoverInput): string {
     `<div class="ssh-title">` +
     `<div class="ssh-name">${esc(name)}</div>` +
     `<div class="ssh-flagline">` +
-    `<img class="ssh-flag" src="/flag-icons/${esc(flag)}.svg" alt="" width="14" height="10" />` +
+    `<img class="ssh-flag" src="${BASE_PATH}/flag-icons/${esc(flag)}.svg" alt="" width="14" height="10" />` +
     `<span>${esc(country)}</span>` +
     `</div>` +
     `<div class="ssh-meta">` +

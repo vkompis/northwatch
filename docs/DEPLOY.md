@@ -47,6 +47,17 @@ pnpm --filter @svalmap/web start
 | `NEXT_PUBLIC_MAP_STYLE`, `NEXT_PUBLIC_MAP_ATTRIBUTION` | Optional: base map style and attribution |
 | `NEXT_PUBLIC_MAPTILER_KEY` | Optional: MapTiler-hosted style |
 
+## GitHub Pages snapshot
+`.github/workflows/pages.yml` publishes a static copy of the map to GitHub Pages every 30 minutes, on each push to `main`, and when run by hand. Each run starts the API, collects data for about three minutes, saves the responses with `scripts-runner/writeSiteSnapshot.ts`, and builds the web app with `NEXT_PUBLIC_SNAPSHOT=1`. Visitors reload the page for newer data.
+
+Vessel search, tracks, sanctions lookups and area alerts need the live API, so the snapshot hides them.
+
+Setup, once:
+- Add the repository secrets `AISSTREAM_API_KEY`, `BW_CLIENT_ID`, `BW_CLIENT_SECRET` and `GFW_API_TOKEN`.
+- Set Settings → Pages → Source to "GitHub Actions".
+
+A run that collects no vessels fails, so the last good copy stays online.
+
 ## Checks after a deploy
 - `/api/health`, `/api/live-positions` and `/api/sanctions/status` answer 200.
 - The map loads and vessels appear within a couple of minutes.

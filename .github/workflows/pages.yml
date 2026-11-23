@@ -1,0 +1,94 @@
+# Publishes a static copy of the map to GitHub Pages. Each run starts the API,
+# lets it collect live data for a few minutes, saves the responses as files and
+# builds the web app against them. Visitors reload the page for newer data.
+name: Publish map snapshot
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: npm ci
+        working-directory: scripts-runner
+
+      # Ships seen in the last runs, so each snapshot is not limited to a few minutes of AIS
+      - uses: actions/cache/restore@v6
+        with:
+          path: data/cache/aisstream-snapshot.json
+          key: ais-snapshot-${{ github.run_id }}
+          restore-keys: ais-snapshot-
+
+      - name: Collect snapshot
+        working-directory: scripts-runner
+        env:
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          BW_CLIENT_ID: ${{ secrets.BW_CLIENT_ID }}
+          BW_CLIENT_SECRET: ${{ secrets.BW_CLIENT_SECRET }}
+          GFW_API_TOKEN: ${{ secrets.GFW_API_TOKEN }}
+        run: |
+          node --import tsx server.ts > "$RUNNER_TEMP/server.log" 2>&1 &
+          server=$!
+          npx tsx writeSiteSnapshot.ts http://localhost:8787 ../apps/web/public/snapshot || {
+            tail -n 80 "$RUNNER_TEMP/server.log"
+            exit 1
+          }
+          echo "NEXT_PUBLIC_SNAPSHOT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          # SIGTERM makes the AIS client write its cache for the next run
+          kill "$server"
+          wait "$server" || true
+
+      - uses: actions/cache/save@v6
+        if: ${{ !cancelled() && hashFiles('data/cache/aisstream-snapshot.json') != '' }}
+        with:
+          path: data/cache/aisstream-snapshot.json
+          key: ais-snapshot-${{ github.run_id }}
+
+      - name: Build static site
+        env:
+          NEXT_PUBLIC_SNAPSHOT: '1'
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          NEXT_PUBLIC_API_BASE_URL: /${{ github.event.repository.name }}/snapshot
+        run: pnpm --filter @svalmap/web build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: apps/web/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,7 +1,14 @@
 'use client';
 
 import type { SpoofReason, VesselFeatureProps } from '@svalmap/ui';
-import { HEADER_COLORS, formatLatLonDm, isRussianResearchVessel, navStatusLabel } from '@svalmap/ui';
+import {
+  BASE_PATH,
+  HEADER_COLORS,
+  SNAPSHOT_MODE,
+  formatLatLonDm,
+  isRussianResearchVessel,
+  navStatusLabel,
+} from '@svalmap/ui';
 import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -211,7 +218,8 @@ export default function VesselDossier({
   onNoteChange: (text: string) => void;
   watched: boolean;
   onWatch: () => void;
-  onAreaAlert: () => void;
+  /** Left out where area alerts are unavailable (the static snapshot) */
+  onAreaAlert?: () => void;
   onExport: () => void;
   /** Spoofing evidence in the ship's loaded track */
   trackSpoofing?: SpoofReason[];
@@ -268,7 +276,7 @@ export default function VesselDossier({
       <div className="dossier-sub">
         <TriangleMarker color={HEADER_COLORS[v.category] || HEADER_COLORS.rest} />
         <img
-          src={`/flag-icons/${v.flag || 'xx'}.svg`}
+          src={`${BASE_PATH}/flag-icons/${v.flag || 'xx'}.svg`}
           alt=""
           width={18}
           height={12}
@@ -351,10 +359,14 @@ export default function VesselDossier({
         ))}
       </dl>
 
-      {isRussianResearchVessel(v.mmsi) && <GfwLastSeenSection data={gfwLastSeen} aisTime={v.lastSeenOnly ? null : v.timestamp} />}
+      {isRussianResearchVessel(v.mmsi) && !SNAPSHOT_MODE && (
+        <GfwLastSeenSection data={gfwLastSeen} aisTime={v.lastSeenOnly ? null : v.timestamp} />
+      )}
 
       <h3 className="dossier-h">Lists</h3>
-      {!sanctions ? (
+      {SNAPSHOT_MODE ? (
+        <p className="dossier-note">List entries are not in this snapshot. The badges above show which lists the ship is on.</p>
+      ) : !sanctions ? (
         <p className="dossier-note">Checking the lists…</p>
       ) : listings.length === 0 ? (
         <p className="dossier-note">Not on the EU, OpenSanctions, Ukraine GUR or FleetLeaks lists.</p>
@@ -426,12 +438,14 @@ export default function VesselDossier({
           </svg>
           {watched ? 'On watchlist' : 'Watch vessel'}
         </button>
-        <button type="button" onClick={onAreaAlert}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M5 7l9-3 6 8-5 8-10-3z" />
-          </svg>
-          Area alert
-        </button>
+        {onAreaAlert && (
+          <button type="button" onClick={onAreaAlert}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 7l9-3 6 8-5 8-10-3z" />
+            </svg>
+            Area alert
+          </button>
+        )}
         <button type="button" onClick={onExport}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />

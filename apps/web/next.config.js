@@ -1,13 +1,18 @@
+// Static GitHub Pages copy (.github/workflows/pages.yml): plain files under a path prefix
+const snapshot = process.env.NEXT_PUBLIC_SNAPSHOT === '1';
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
     // appDir is enabled by default in Next 14 app router; removing invalid key warning
   },
+  ...(snapshot ? { output: 'export', basePath, images: { unoptimized: true } } : {}),
   transpilePackages: ['@svalmap/types', '@svalmap/ui', '@svalmap/config', 'maplibre-gl'],
   env: {
     MAP_BASE_URL: process.env.MAP_BASE_URL,
     MAP_ATTRIBUTION: process.env.MAP_ATTRIBUTION,
-    NEXT_PUBLIC_MAP_STYLE: process.env.NEXT_PUBLIC_MAP_STYLE || '/styles/svalmap-dark.json',
+    NEXT_PUBLIC_MAP_STYLE: process.env.NEXT_PUBLIC_MAP_STYLE || `${basePath}/styles/svalmap-dark.json`,
     NEXT_PUBLIC_MAP_ATTRIBUTION: process.env.NEXT_PUBLIC_MAP_ATTRIBUTION || 'AIS: BarentsWatch, AISStream · Events: Global Fishing Watch',
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8787',
   },
@@ -33,5 +38,8 @@ const nextConfig = {
     ];
   },
 };
+
+// A static export has no server to send these headers
+if (snapshot) delete nextConfig.headers;
 
 module.exports = nextConfig;

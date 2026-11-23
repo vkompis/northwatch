@@ -50,6 +50,9 @@ import {
   type MapTheme,
   isRussianResearchVessel,
   RUSSIAN_RESEARCH_VESSELS,
+  BASE_PATH,
+  SNAPSHOT_MODE,
+  SNAPSHOT_AT,
 } from '@svalmap/ui';
 import VesselFilterPanel from './VesselFilterPanel';
 import MapMenu, { MENU_ICONS, type MapMenuId, type MapMenuItem } from './MapMenu';
@@ -194,7 +197,7 @@ export default function HomePage() {
   const [pendingMmsi, setPendingMmsi] = useState<string | null>(null);
 
   const mapStyle =
-    process.env.NEXT_PUBLIC_MAP_STYLE || '/styles/svalmap-dark.json';
+    process.env.NEXT_PUBLIC_MAP_STYLE || `${BASE_PATH}/styles/svalmap-dark.json`;
   const attribution =
     process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ||
     // Basemap credit (OpenFreeMap · OpenMapTiles · OpenStreetMap) comes from the style source
@@ -621,7 +624,7 @@ export default function HomePage() {
   useEffect(() => {
     // Clear first so the previous vessel's "Yes (list hit)" never shows on the new one
     setSanctionsInfo(null);
-    if (!dossierMmsi && !dossierImo) return;
+    if (SNAPSHOT_MODE || (!dossierMmsi && !dossierImo)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -643,7 +646,7 @@ export default function HomePage() {
   // Fallback "last seen" from Global Fishing Watch for research ships
   useEffect(() => {
     setGfwLastSeen(null);
-    if (!dossierMmsi || !isRussianResearchVessel(dossierMmsi)) return;
+    if (SNAPSHOT_MODE || !dossierMmsi || !isRussianResearchVessel(dossierMmsi)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -675,13 +678,18 @@ export default function HomePage() {
   const statusLabel = useMemo(() => {
     if (aisStatus.error) return 'AIS error';
     if (aisStatus.lastUpdate) {
-      const t = new Date(aisStatus.lastUpdate);
-      return `${aisStatus.vesselCount} ${aisStatus.vesselCount === 1 ? 'vessel' : 'vessels'} · ${t.toLocaleTimeString()}`;
+      const count = `${aisStatus.vesselCount} ${aisStatus.vesselCount === 1 ? 'vessel' : 'vessels'}`;
+      if (SNAPSHOT_AT) {
+        const at = new Date(SNAPSHOT_AT).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+        return `${count} · snapshot ${at}`;
+      }
+      return `${count} · ${new Date(aisStatus.lastUpdate).toLocaleTimeString()}`;
     }
     return 'Loading ships…';
   }, [aisStatus]);
 
   const freshnessHint = useMemo(() => {
+    if (SNAPSHOT_MODE) return 'Reload the page for newer data';
     const parts: string[] = [];
     if (healthMeta?.sanctions?.cacheAgeMs != null) {
       const h = Math.round(healthMeta.sanctions.cacheAgeMs / 3600000);
@@ -867,7 +875,7 @@ export default function HomePage() {
                         <svg className="flag-option-tick" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M5 12.5l4.5 4.5L19 7.5" />
                         </svg>
-                        <img src={`/flag-icons/${opt.iso2}.svg`} alt="" width={16} height={11} />
+                        <img src={`${BASE_PATH}/flag-icons/${opt.iso2}.svg`} alt="" width={16} height={11} />
                         <span>{opt.label}</span>
                       </label>
                     );
@@ -1111,32 +1119,34 @@ export default function HomePage() {
     >
       <header className="app-chrome" aria-label="NorthWatch status">
         <div className="brand">NorthWatch</div>
-        <VesselSearch
-          apiBase={apiBase}
-          onSelect={(hit) =>
-            openVesselByMmsi(hit.mmsi, {
-              name: hit.vessel_name || hit.name,
-              imo: hit.imo,
-              shipType: hit.shipType,
-              sanctioned: hit.sanctioned,
-              shadowfleet: hit.shadowfleet,
-              sanctionedMaster: hit.sanctionedMaster,
-              spoofing: hit.spoofing,
-              military: hit.military,
-              research: hit.research,
-              lon: hit.lon,
-              lat: hit.lat,
-              speed: hit.speed,
-              course: hit.course,
-              heading: hit.heading,
-              status: hit.status,
-              destination: hit.destination,
-              eta: hit.eta,
-              timestamp: hit.timestamp,
-            })
-          }
-          onOpenMmsi={(mmsi) => openVesselByMmsi(mmsi)}
-        />
+        {!SNAPSHOT_MODE && (
+          <VesselSearch
+            apiBase={apiBase}
+            onSelect={(hit) =>
+              openVesselByMmsi(hit.mmsi, {
+                name: hit.vessel_name || hit.name,
+                imo: hit.imo,
+                shipType: hit.shipType,
+                sanctioned: hit.sanctioned,
+                shadowfleet: hit.shadowfleet,
+                sanctionedMaster: hit.sanctionedMaster,
+                spoofing: hit.spoofing,
+                military: hit.military,
+                research: hit.research,
+                lon: hit.lon,
+                lat: hit.lat,
+                speed: hit.speed,
+                course: hit.course,
+                heading: hit.heading,
+                status: hit.status,
+                destination: hit.destination,
+                eta: hit.eta,
+                timestamp: hit.timestamp,
+              })
+            }
+            onOpenMmsi={(mmsi) => openVesselByMmsi(mmsi)}
+          />
+        )}
         <MapMenu items={menuItems} open={menuOpen} onOpenChange={setMenuOpen} />
         <div className="chrome-meta">
           <span
@@ -1229,7 +1239,7 @@ export default function HomePage() {
         />
       </div>
 
-      {selVessel && (
+      {selVessel && !SNAPSHOT_MODE && (
         <VesselTimeline
           apiBase={apiBase}
           mmsi={selVessel.mmsi}
@@ -1243,24 +1253,26 @@ export default function HomePage() {
         />
       )}
 
-      <div
-        className={`alerts-slot ${!alertsExpanded ? 'tucked' : ''}`}
-      >
-        <AlertPanel
-          apiBase={apiBase}
-          draftMmsi={alertDraft?.mmsi || null}
-          draftName={alertDraft?.name || null}
-          onDraftConsumed={() => setAlertDraft(null)}
-          drawing={drawingAoi}
-          onDrawingChange={setDrawingAoi}
-          draftRing={draftRing}
-          onDraftRingChange={setDraftRing}
-          onRulesChange={setAlertRules}
-          collapsed={!alertsExpanded}
-          onExpand={() => setAlertsExpanded(true)}
-          onCollapse={() => setAlertsExpanded(false)}
-        />
-      </div>
+      {!SNAPSHOT_MODE && (
+        <div
+          className={`alerts-slot ${!alertsExpanded ? 'tucked' : ''}`}
+        >
+          <AlertPanel
+            apiBase={apiBase}
+            draftMmsi={alertDraft?.mmsi || null}
+            draftName={alertDraft?.name || null}
+            onDraftConsumed={() => setAlertDraft(null)}
+            drawing={drawingAoi}
+            onDrawingChange={setDrawingAoi}
+            draftRing={draftRing}
+            onDraftRingChange={setDraftRing}
+            onRulesChange={setAlertRules}
+            collapsed={!alertsExpanded}
+            onExpand={() => setAlertsExpanded(true)}
+            onCollapse={() => setAlertsExpanded(false)}
+          />
+        </div>
+      )}
 
       <div
         id="detail-drawer"
@@ -1293,22 +1305,28 @@ export default function HomePage() {
                         })
                   )
                 }
-                onAreaAlert={() => {
-                  setAlertDraft({
-                    mmsi: selectedVessel.mmsi,
-                    name: selectedVessel.name || `MMSI ${selectedVessel.mmsi}`,
-                  });
-                  setAlertsExpanded(true);
-                }}
+                onAreaAlert={
+                  SNAPSHOT_MODE
+                    ? undefined
+                    : () => {
+                        setAlertDraft({
+                          mmsi: selectedVessel.mmsi,
+                          name: selectedVessel.name || `MMSI ${selectedVessel.mmsi}`,
+                        });
+                        setAlertsExpanded(true);
+                      }
+                }
                 onExport={async () => {
                   let track: any = null;
-                  try {
-                    const r = await fetch(
-                      `${apiBase}/api/tracks24h?mmsi=${encodeURIComponent(selectedVessel.mmsi)}&days=${trackDays}&interval=15`
-                    );
-                    track = await r.json();
-                  } catch {
-                    /* ignore */
+                  if (!SNAPSHOT_MODE) {
+                    try {
+                      const r = await fetch(
+                        `${apiBase}/api/tracks24h?mmsi=${encodeURIComponent(selectedVessel.mmsi)}&days=${trackDays}&interval=15`
+                      );
+                      track = await r.json();
+                    } catch {
+                      /* ignore */
+                    }
                   }
                   exportVesselPack({
                     vessel: selectedVessel as any,
@@ -1338,7 +1356,7 @@ export default function HomePage() {
                   {ev.sanctioned && (
                     <div className="country" style={{ marginTop: 6 }}>
                       <img
-                        src="/markers/Circles/Sanksjon.svg"
+                        src={`${BASE_PATH}/markers/Circles/Sanksjon.svg`}
                         alt=""
                         style={{ width: 16, height: 12 }}
                       />
@@ -1348,7 +1366,7 @@ export default function HomePage() {
                   {ev.shadowfleet && (
                     <div className="country" style={{ marginTop: 6 }}>
                       <img
-                        src="/markers/Circles/shadowtriangle.svg"
+                        src={`${BASE_PATH}/markers/Circles/shadowtriangle.svg`}
                         alt=""
                         style={{ width: 16, height: 12 }}
                       />
@@ -1421,11 +1439,13 @@ export default function HomePage() {
                   {ev.note && (
                     <div className="row muted">{ev.note}</div>
                   )}
-                  <DarkLeads
-                    apiBase={apiBase}
-                    event={ev}
-                    onOpenVessel={(mmsi, name) => openVesselByMmsi(mmsi, { name })}
-                  />
+                  {!SNAPSHOT_MODE && (
+                    <DarkLeads
+                      apiBase={apiBase}
+                      event={ev}
+                      onOpenVessel={(mmsi, name) => openVesselByMmsi(mmsi, { name })}
+                    />
+                  )}
                   <div className="row">
                     <span className="k">Position:</span>
                     <span className="v">
@@ -1465,19 +1485,21 @@ export default function HomePage() {
                       >
                         Add to watchlist
                       </button>
-                      <button
-                        type="button"
-                        className="detail-action"
-                        onClick={() => {
-                          setAlertDraft({
-                            mmsi: ev.mmsi!,
-                            name: ev.vessels || `MMSI ${ev.mmsi}`,
-                          });
-                          setAlertsExpanded(true);
-                        }}
-                      >
-                        Create area alert
-                      </button>
+                      {!SNAPSHOT_MODE && (
+                        <button
+                          type="button"
+                          className="detail-action"
+                          onClick={() => {
+                            setAlertDraft({
+                              mmsi: ev.mmsi!,
+                              name: ev.vessels || `MMSI ${ev.mmsi}`,
+                            });
+                            setAlertsExpanded(true);
+                          }}
+                        >
+                          Create area alert
+                        </button>
+                      )}
                     </div>
                   )}
                   {ev.partnerMmsi && (
@@ -1853,25 +1875,25 @@ export default function HomePage() {
                   <div className="item">
                     <img
                       className="legend-icon shadow"
-                      src="/markers/Circles/shadowtriangle.svg"
+                      src={`${BASE_PATH}/markers/Circles/shadowtriangle.svg`}
                       alt=""
                     />
                     Shadow fleet
                   </div>
                   <div className="item">
-                    <img className="legend-icon" src="/markers/Circles/Sanksjon.svg" alt="" />
+                    <img className="legend-icon" src={`${BASE_PATH}/markers/Circles/Sanksjon.svg`} alt="" />
                     Sanctioned
                   </div>
                   <div className="item">
-                    <img className="legend-icon" src="/markers/Circles/Militarycircle.svg" alt="" />
+                    <img className="legend-icon" src={`${BASE_PATH}/markers/Circles/Militarycircle.svg`} alt="" />
                     Military
                   </div>
                   <div className="item">
-                    <img className="legend-icon" src="/markers/Circles/Researchcircle.svg" alt="" />
+                    <img className="legend-icon" src={`${BASE_PATH}/markers/Circles/Researchcircle.svg`} alt="" />
                     Research
                   </div>
                   <div className="item">
-                    <img className="legend-icon" src="/markers/Circles/lastseenring.svg" alt="" />
+                    <img className="legend-icon" src={`${BASE_PATH}/markers/Circles/lastseenring.svg`} alt="" />
                     Research, last known position
                   </div>
                 </div>
