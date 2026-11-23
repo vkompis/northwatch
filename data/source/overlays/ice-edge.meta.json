@@ -12,5 +12,5 @@
     "minimum_latitude": 54.0,
     "maximum_latitude": 85.0
   },
-  "path": "~/Dev/svalmap/data/source/overlays/ice-edge.geojson"
+  "path": "data/source/overlays/ice-edge.geojson"
 }

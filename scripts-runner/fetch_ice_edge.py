@@ -245,7 +245,8 @@ def fetch_and_write() -> dict:
         **props,
         "feature_count": len(geojson["features"]),
         "bbox": BBOX,
-        "path": str(OUT_PATH),
+        # Relative to the repo: the meta file is committed and published, a full path names the user
+        "path": str(OUT_PATH.relative_to(REPO)),
     }
     META_PATH.write_text(json.dumps(meta, indent=2) + "\n")
     print(
