@@ -192,6 +192,16 @@ export default function HomePage() {
   const [shareHint, setShareHint] = useState<string | null>(null);
   // Light / dark map; layout.tsx sets data-theme before first paint from the same key
   const [theme, setTheme] = useState<MapTheme>('dark');
+  // Full screen where the browser allows it; iPhone Safari only allows it for video,
+  // so there the button stays hidden and "Add to Home Screen" gives the full-screen app
+  const [canFullscreen, setCanFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    setCanFullscreen(Boolean(document.fullscreenEnabled));
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
   /** Where the map is — for "satellite images of this area" */
   const [mapView, setMapView] = useState<MapView | null>(null);
   const [pendingMmsi, setPendingMmsi] = useState<string | null>(null);
@@ -680,7 +690,13 @@ export default function HomePage() {
     if (aisStatus.lastUpdate) {
       const count = `${aisStatus.vesselCount} ${aisStatus.vesselCount === 1 ? 'vessel' : 'vessels'}`;
       if (SNAPSHOT_AT) {
-        const at = new Date(SNAPSHOT_AT).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+        // No year: the snapshot is at most hours old, and the short form keeps the phone header on one line
+        const at = new Date(SNAPSHOT_AT).toLocaleString([], {
+          day: 'numeric',
+          month: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
         return `${count} · snapshot ${at}`;
       }
       return `${count} · ${new Date(aisStatus.lastUpdate).toLocaleTimeString()}`;
@@ -1160,6 +1176,42 @@ export default function HomePage() {
           )}
           {aisStatus.trackStatus === 'error' && aisStatus.trackError && (
             <span className="chrome-hint warn">{aisStatus.trackError}</span>
+          )}
+          {/* A home-screen app on iPhone has no browser reload, and the snapshot only changes on reload */}
+          {SNAPSHOT_MODE && (
+            <button
+              type="button"
+              className="chrome-btn theme-toggle"
+              onClick={() => window.location.reload()}
+              aria-label="Reload for newer data"
+              title="Reload for newer data"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" />
+              </svg>
+            </button>
+          )}
+          {canFullscreen && (
+            <button
+              type="button"
+              className="chrome-btn theme-toggle"
+              onClick={() => {
+                if (document.fullscreenElement) void document.exitFullscreen();
+                else void document.documentElement.requestFullscreen().catch(() => {});
+              }}
+              aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+              title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path
+                  d={
+                    isFullscreen
+                      ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5'
+                      : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'
+                  }
+                />
+              </svg>
+            </button>
           )}
           <button
             type="button"

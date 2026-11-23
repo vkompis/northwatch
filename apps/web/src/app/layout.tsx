@@ -20,8 +20,15 @@ const mono = IBM_Plex_Mono({
   variable: '--font-mono',
 });
 
+// Prefix for files in public/ when the site lives under a path (GitHub Pages)
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 export const metadata: Metadata = {
   title: 'NorthWatch — maritime OSINT for the High North',
+  // "Add to Home Screen" opens the map full screen, without the browser bars
+  manifest: `${basePath}/manifest.webmanifest`,
+  appleWebApp: { capable: true, title: 'NorthWatch', statusBarStyle: 'black' },
+  icons: { icon: `${basePath}/icon.svg`, apple: `${basePath}/apple-touch-icon.png` },
   description:
     'Live ships, sanctions and shadow-fleet lists, warnings and seabed infrastructure across the Norwegian Sea, Barents Sea and Svalbard',
   keywords: 'maritime, OSINT, Norwegian Sea, Barents Sea, Svalbard, vessel tracking, sanctions, shadow fleet',
