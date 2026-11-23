@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { IBM_Plex_Mono, IBM_Plex_Sans, Newsreader } from 'next/font/google';
 import './globals.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -27,13 +27,21 @@ export const metadata: Metadata = {
   title: 'NorthWatch — maritime OSINT for the High North',
   // "Add to Home Screen" opens the map full screen, without the browser bars
   manifest: `${basePath}/manifest.webmanifest`,
-  appleWebApp: { capable: true, title: 'NorthWatch', statusBarStyle: 'black' },
+  // Translucent: the map runs under the iPhone status bar; globals.css pads the top bar for it
+  appleWebApp: { capable: true, title: 'NorthWatch', statusBarStyle: 'black-translucent' },
   icons: { icon: `${basePath}/icon.svg`, apple: `${basePath}/apple-touch-icon.png` },
   description:
     'Live ships, sanctions and shadow-fleet lists, warnings and seabed infrastructure across the Norwegian Sea, Barents Sea and Svalbard',
   keywords: 'maritime, OSINT, Norwegian Sea, Barents Sea, Svalbard, vessel tracking, sanctions, shadow fleet',
   authors: [{ name: 'NorthWatch' }],
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+// cover: edge to edge on phones with a notch / home indicator (safe-area padding in globals.css)
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#101d25',
 };
 
 export default function RootLayout({
