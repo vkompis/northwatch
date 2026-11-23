@@ -70,9 +70,10 @@ async function main() {
     fs.writeFileSync(file, JSON.stringify(body));
     const size = Array.isArray(body) ? `${body.length} items` : `${JSON.stringify(body).length} bytes`;
     console.log(`[snapshot] ${endpoint} -> ${status}, ${size}`);
-    if (endpoint === '/api/live-positions' && !(Array.isArray(body) && body.length > 0)) {
+    // Research ships drawn at their last GFW position are there without any AIS feed
+    if (endpoint === '/api/live-positions' && !(Array.isArray(body) && body.some((v) => !v.lastSeenOnly))) {
       // Keep the last good site instead of publishing an empty map
-      throw new Error('no live positions; check the AIS secrets');
+      throw new Error('no live AIS positions; check the AIS secrets');
     }
   }
 

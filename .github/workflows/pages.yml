@@ -105,6 +105,8 @@ jobs:
             tail -n 80 "$RUNNER_TEMP/server.log"
             exit 1
           }
+          # How the AIS feeds did (the API never logs keys or tokens)
+          grep -E '\[(aisstream|barentswatch)\]|BW token' "$RUNNER_TEMP/server.log" | tail -n 20 || true
           echo "NEXT_PUBLIC_SNAPSHOT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           # SIGTERM makes the AIS client write its cache for the next run
           kill "$server"
