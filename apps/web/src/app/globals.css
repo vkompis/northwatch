@@ -1095,6 +1095,21 @@ body {
   line-height: 1.35;
   pointer-events: none;
 }
+/* Phones: a tap shows the card with a button into the dossier */
+.svalmap-ship-tap-popup .ssh-more {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--sv-accent);
+  color: #1a1206;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
 .svalmap-ship-hover .ssh-head {
   display: flex;
   gap: 10px;

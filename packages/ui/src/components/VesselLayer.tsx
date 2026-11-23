@@ -511,19 +511,16 @@ export default function VesselLayer({
       }
     };
 
-    const showHover = (feature: any) => {
-      if (!interactiveRef.current || !feature?.properties) return;
+    /** The ship's card: what hover shows, and what a tap shows on a phone */
+    const shipCard = (feature: any): { html: string; lon: number; lat: number } | null => {
+      if (!feature?.properties) return null;
       const p = feature.properties as Record<string, unknown>;
       const mmsi = String(p.mmsi ?? '');
-      if (selectedMmsiRef.current && mmsi === String(selectedMmsiRef.current)) {
-        hideHover();
-        return;
-      }
       const coords = feature.geometry?.coordinates;
-      if (!Array.isArray(coords) || coords.length < 2) return;
+      if (!Array.isArray(coords) || coords.length < 2) return null;
       const lon = Number(coords[0]);
       const lat = Number(coords[1]);
-      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
 
       const numOrNull = (v: unknown) => {
         if (v == null || v === '' || v === 'null' || v === 'undefined') return null;
@@ -560,7 +557,18 @@ export default function VesselLayer({
         spoofing: Number(p.spoofing) ? 1 : 0,
         lastSeenOnly: Number(p.lastSeenOnly) ? 1 : 0,
       });
+      return { html, lon, lat };
+    };
 
+    const showHover = (feature: any) => {
+      if (!interactiveRef.current || !feature?.properties) return;
+      if (selectedMmsiRef.current && String(feature.properties.mmsi ?? '') === String(selectedMmsiRef.current)) {
+        hideHover();
+        return;
+      }
+      const card = shipCard(feature);
+      if (!card) return;
+      const { html, lon, lat } = card;
       if (!hoverPopup) {
         hoverPopup = new maplibregl.Popup({
           closeButton: false,
@@ -572,6 +580,41 @@ export default function VesselLayer({
         });
       }
       hoverPopup.setLngLat([lon, lat]).setHTML(html).addTo(map);
+    };
+
+    // Phones have no hover: the browser's emulated mouse flashed the hover card just before
+    // the tap opened the dossier. There a tap shows the card, and More info opens the dossier.
+    const touchFirst = () => typeof window !== 'undefined' && !!window.matchMedia?.('(hover: none)').matches;
+    let tapPopup: maplibregl.Popup | null = null;
+    const hideTapCard = () => {
+      try {
+        tapPopup?.remove();
+      } catch {
+        /* ignore */
+      }
+    };
+    const showTapCard = (feature: any, onMore: () => void) => {
+      const card = shipCard(feature);
+      if (!card) return;
+      hideTapCard();
+      tapPopup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 14,
+        className: 'svalmap-ship-hover-popup svalmap-ship-tap-popup',
+        maxWidth: '280px',
+        anchor: 'top',
+      })
+        .setLngLat([card.lon, card.lat])
+        .setHTML(`${card.html}<button type="button" class="ssh-more">More info</button>`)
+        .addTo(map);
+      tapPopup
+        .getElement()
+        .querySelector('.ssh-more')
+        ?.addEventListener('click', () => {
+          hideTapCard();
+          onMore();
+        });
     };
 
     let lastStatus: VesselLayerStatus = {
@@ -1572,17 +1615,19 @@ export default function VesselLayer({
               .some((r: any) => String(r.properties?.mmsi) === String(f.properties.mmsi));
             if (rigHit) return;
           }
-          offerClick(e, CLICK_PRIORITY.ship, () => selectShip(e, f));
+          offerClick(e, CLICK_PRIORITY.ship, () =>
+            touchFirst() ? showTapCard(f, () => selectShip({}, f)) : selectShip(e, f)
+          );
         };
         map.on('click', 'ships-hit', clickHandler);
         hoverEnterHandler = (e: any) => {
-          if (!interactiveRef.current) return;
+          if (!interactiveRef.current || touchFirst()) return;
           map.getCanvas().style.cursor = 'pointer';
           const f = nearestFeature(map, e.features, e.point);
           if (f) showHover(f);
         };
         hoverMoveHandler = (e: any) => {
-          if (!interactiveRef.current) return;
+          if (!interactiveRef.current || touchFirst()) return;
           const f = nearestFeature(map, e.features, e.point);
           if (f) showHover(f);
         };
@@ -1638,6 +1683,7 @@ export default function VesselLayer({
           const hits = overlayLayerIds.length
             ? map.queryRenderedFeatures(e.point, { layers: overlayLayerIds })
             : [];
+          if (!hits.some((h: any) => h.layer?.id === 'ships-hit')) hideTapCard();
           if (hits.length) return;
           offerClick(e, CLICK_PRIORITY.background, () => {
             clearTrack();
@@ -1734,6 +1780,8 @@ export default function VesselLayer({
       if (hoverLeaveHandler) map.off('mouseleave', 'ships-hit', hoverLeaveHandler);
       hideHover();
       hoverPopup = null;
+      hideTapCard();
+      tapPopup = null;
       if (projHoverEnter) {
         map.off('mouseenter', 'vessel-projection-rings', projHoverEnter);
         map.off('mousemove', 'vessel-projection-rings', projHoverEnter);
