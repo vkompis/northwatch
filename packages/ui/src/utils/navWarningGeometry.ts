@@ -52,8 +52,8 @@ export function findWarningPositions(text: string): Found[] {
 
 const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
 
-/** "A. ", "b) ", "(2) ", "3. " directly in front of a position. */
-const TRAILING_LABEL_RE = /(?:^|[\s.,;:])\(?(?:[A-Za-z]|\d{1,2}|[ivx]{1,4})[.)]\s*$/;
+/** "A. ", "b) ", "(2) ", "3. " or "A (" directly in front of a position. */
+const TRAILING_LABEL_RE = /(?:^|[\s.,;:])\(?(?:[A-Za-z]|\d{1,2}|[ivx]{1,4})(?:[.)]|\s*\()\s*$/;
 const CONNECTOR_RE = /\b(?:AND|TO|THEN|THENCE|OG|TIL)\b/gi;
 
 /** What sits between two positions: nothing (same list), a list label, or other words. */

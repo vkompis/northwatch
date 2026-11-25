@@ -124,6 +124,29 @@ B. 71-00N 022-00E, 71-10N 022-30E, 71-05N 023-00E.`);
   assert.deepEqual(warningPartsFromText('The following NAVAREA XIX warnings are in effect: 114, 128.'), []);
 }
 
+// NAVAREA XIX 139/26: "A (pos), B (pos)" lists, two areas in one warning
+{
+  const parts = warningPartsFromText(`NAVAREA XIX 139/26. One research rocket launch is planned from Andoya Space between 30 November and 12 December 2026, daily from 1700 to 2300 UTC. Mariners are advised to be aware of the following danger areas:
+
+Danger area inner is bounded by points: A (69°38.0'N 014°41.0'E), B (69°36.0'N 015°12.0'E), C (69°42.0'N 015°43.0'E), D (69°58.0'N 015°50.0'E), E (70°12.0'N 015°34.0'E), F (70°22.0'N 015°00.0'E), G (70°24.0'N 014°14.0'E), H (70°07.0'N 013°48.0'E), I (69°50.0'N 014°05.0'E).
+
+Danger area sea is bounded by points: A (69°21.0'N 015°51.0'E), B (69°17.0'N 015°58.0'E), C (69°18.0'N 016°04.0'E), D (69°22.0'N 016°00.0'E).
+
+For coordination contact Andoya: Tel +47 940 75 944 or +47 761 44 582. VHF channels 16 or 14. Daily updates are available at www.andoyaspace.no.`);
+  assert.deepEqual(
+    parts.map((p) => [p.shape, p.geometry.type]),
+    [
+      ['area', 'Polygon'],
+      ['area', 'Polygon'],
+    ]
+  );
+  const [inner, sea] = parts.map((p) => (p.geometry as any).coordinates[0]);
+  assert.equal(inner.length, 10);
+  assert.equal(sea.length, 5);
+  assert.ok(near(inner[0][0], 14.683333) && near(inner[0][1], 69.633333));
+  assert.ok(near(sea[2][0], 16.066667) && near(sea[2][1], 69.3));
+}
+
 // Other notations: compact, degree signs, decimal comma, west longitude
 {
   assert.deepEqual(findWarningPositions('7012.5N 02001.0E')[0].lonlat, [20.016667, 70.208333]);

@@ -690,7 +690,19 @@ const NAVWARNINGS_COASTAL_URL =
 const NAVWARNINGS_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 let navWarningsCache: { ts: number; data: any } | null = null;
 
-/** Parse simple WKT POINT / MULTIPOINT / POLYGON (lon lat pairs) to GeoJSON geometry. */
+/** WKT ring "lon lat, lon lat, …" → closed GeoJSON ring, or null. */
+function parseWktRing(s: string): number[][] | null {
+  const ring = s.split(',').map((pair) => pair.trim().split(/\s+/).map(Number));
+  if (ring.length < 3 || ring.some((c) => c.length < 2 || !Number.isFinite(c[0]) || !Number.isFinite(c[1]))) {
+    return null;
+  }
+  const a = ring[0];
+  const b = ring[ring.length - 1];
+  if (a[0] !== b[0] || a[1] !== b[1]) ring.push([...a]);
+  return ring.map((c) => [c[0], c[1]]);
+}
+
+/** Parse simple WKT POINT / MULTIPOINT / POLYGON / MULTIPOLYGON (lon lat pairs) to GeoJSON geometry. */
 function parseWktGeometry(wkt: string | null | undefined): any | null {
   if (!wkt || typeof wkt !== 'string') return null;
   const s = wkt.trim();
@@ -710,21 +722,40 @@ function parseWktGeometry(wkt: string | null | undefined): any | null {
     if (coords.length === 1) return { type: 'Point', coordinates: coords[0] };
     return { type: 'MultiPoint', coordinates: coords };
   }
-  const polygon = /^POLYGON\s*\(\s*\((.+)\)\s*\)$/i.exec(s);
+  const polygon = /^POLYGON\s*\(\s*\(([^()]+)\)\s*\)$/i.exec(s);
   if (polygon) {
-    const ring = polygon[1].split(',').map((pair) => {
-      const [lon, lat] = pair.trim().split(/\s+/).map(Number);
-      return [lon, lat];
-    });
-    if (ring.length < 3 || ring.some((c) => !Number.isFinite(c[0]) || !Number.isFinite(c[1]))) {
-      return null;
+    const ring = parseWktRing(polygon[1]);
+    return ring ? { type: 'Polygon', coordinates: [ring] } : null;
+  }
+  // MULTIPOLYGON(((lon lat, …)),((lon lat, …))) — e.g. NAVAREA XIX 139/26, two rocket danger areas
+  const multipolygon = /^MULTIPOLYGON\s*\((.+)\)$/i.exec(s);
+  if (multipolygon) {
+    const polygons: number[][][][] = [];
+    for (const m of multipolygon[1].matchAll(/\(\s*\(([^()]+)\)\s*\)/g)) {
+      const ring = parseWktRing(m[1]);
+      if (ring) polygons.push([ring]);
     }
-    const a = ring[0];
-    const b = ring[ring.length - 1];
-    if (a[0] !== b[0] || a[1] !== b[1]) ring.push([...a]);
-    return { type: 'Polygon', coordinates: [ring] };
+    if (!polygons.length) return null;
+    if (polygons.length === 1) return { type: 'Polygon', coordinates: polygons[0] };
+    return { type: 'MultiPolygon', coordinates: polygons };
   }
   return null;
+}
+
+/** Rough extent of a polygon's outer ring, in square degrees (only used to rank polygons). */
+function ringExtent(coordinates: number[][][]): number {
+  const ring = coordinates[0] || [];
+  const lons = ring.map((c) => c[0]);
+  const lats = ring.map((c) => c[1]);
+  return (Math.max(...lons) - Math.min(...lons)) * (Math.max(...lats) - Math.min(...lats));
+}
+
+/** A MultiPolygon as its separate polygons, largest first; any other geometry as itself. */
+function splitPolygons(geometry: any): any[] {
+  if (geometry?.type !== 'MultiPolygon') return [geometry];
+  return [...geometry.coordinates]
+    .sort((a: number[][][], b: number[][][]) => ringExtent(b) - ringExtent(a))
+    .map((coordinates: any) => ({ type: 'Polygon', coordinates }));
 }
 
 /** Kystverket timestamps carry no zone; they are UTC (DTG). */
@@ -751,6 +782,9 @@ function cleanWarningText(v: unknown): string | null {
  * "general position". Drawn, that is a red sheet over the Norwegian Sea and the Arctic.
  */
 function isAreaWideGeometry(geometry: any): boolean {
+  if (geometry?.type === 'MultiPolygon') {
+    return splitPolygons(geometry).some(isAreaWideGeometry);
+  }
   if (geometry?.type !== 'Polygon') return false;
   const ring: number[][] = geometry.coordinates?.[0] || [];
   const lons = ring.map((c) => c[0]);
@@ -829,8 +863,9 @@ async function fetchNavWarningsGeoJSON(): Promise<{
       // Kystverket's own polygon is drawn as given. Its points are an unordered bag, so when
       // the text says they bound an area, follow a route or mark a circle, draw that instead;
       // and when it only has the whole-NAVAREA position, use whatever positions the text gives.
+      const kystverketArea = placed?.type === 'Polygon' || placed?.type === 'MultiPolygon';
       const fromText = placed
-        ? placed.type !== 'Polygon' && parts.some((p) => p.shape !== 'points')
+        ? !kystverketArea && parts.some((p) => p.shape !== 'points')
         : parts.length > 0;
       if (fromText) {
         parts.forEach((p, i) =>
@@ -846,16 +881,19 @@ async function fetchNavWarningsGeoJSON(): Promise<{
         notices.push({ ...properties, areaWide: Boolean(geometry) });
         continue;
       }
-      features.push({
-        type: 'Feature',
-        geometry: placed,
-        properties: {
-          ...properties,
-          shape: placed.type === 'Polygon' ? 'area' : 'points',
-          shapeFrom: 'kystverket',
-          primary: 1,
-        },
-      });
+      // One feature per area, so each gets its own small-area ring; one label, on the largest
+      splitPolygons(placed).forEach((geometry, i) =>
+        features.push({
+          type: 'Feature',
+          geometry,
+          properties: {
+            ...properties,
+            shape: kystverketArea ? 'area' : 'points',
+            shapeFrom: 'kystverket',
+            primary: i === 0 ? 1 : 0,
+          },
+        })
+      );
     }
   }
   return {
