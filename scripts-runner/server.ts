@@ -29,6 +29,13 @@ import {
 import { isRussianResearchVessel, RUSSIAN_RESEARCH_VESSELS } from './russianResearchVessels';
 import { dataSource } from './paths';
 import {
+  DIGITRAFFIC_REFRESH_MS,
+  getDigitrafficStatus,
+  getDigitrafficVessels,
+  refreshDigitraffic,
+  type DigitrafficVessel,
+} from './digitrafficClient';
+import {
   deleteServerAlert,
   emailConfigured,
   listServerAlerts,
@@ -592,6 +599,7 @@ app.get('/api/health', (_req, res) => {
     api: 'scripts-runner',
     port: PORT,
     aisstream: ais,
+    digitraffic: getDigitrafficStatus(),
     sanctions: {
       mmsi: SANCTIONED_MMSI.size,
       imo: SANCTIONED_IMO.size,
@@ -1634,7 +1642,24 @@ function barentsWatchInput(v: any) {
   };
 }
 
-/** Same vessel from AISStream (existing) and BarentsWatch: newest fix wins, static fields fill gaps. */
+function digitrafficInput(v: DigitrafficVessel) {
+  return { ...v, source: 'digitraffic' };
+}
+
+/** "aisstream" + "barentswatch" → "aisstream+bw", the name the dossier knows */
+function joinSources(a: string, b: string): string {
+  const parts = [
+    ...new Set(
+      `${a || ''}+${b || ''}`
+        .split('+')
+        .filter(Boolean)
+        .map((p) => (p === 'barentswatch' ? 'bw' : p))
+    ),
+  ];
+  return parts.length === 1 && parts[0] === 'bw' ? 'barentswatch' : parts.join('+');
+}
+
+/** Same vessel from two feeds: newest fix wins, static fields fill gaps. */
 function mergeFeedRecords(existing: any, bw: any): any {
   // AISStream used to win unconditionally, even with a fix up to 45 min older than BW's
   const bwTime = Date.parse(String(bw.timestamp ?? ''));
@@ -1658,7 +1683,7 @@ function mergeFeedRecords(existing: any, bw: any): any {
     shipType:
       existing.shipType && existing.shipType !== 'Unknown' ? existing.shipType : bw.shipType,
     eta: existing.eta || bw.eta,
-    source: existing.source === 'aisstream' ? 'aisstream+bw' : existing.source,
+    source: joinSources(existing.source, bw.source),
   };
 }
 
@@ -1768,6 +1793,13 @@ async function buildLivePositionsList(): Promise<{
     byMmsi.set(normalized.mmsi, existing ? mergeFeedRecords(existing, normalized) : normalized);
   }
 
+  for (const v of getDigitrafficVessels()) {
+    const normalized = normalizeAndCheck(digitrafficInput(v));
+    if (!normalized) continue;
+    const existing = byMmsi.get(normalized.mmsi);
+    byMmsi.set(normalized.mmsi, existing ? mergeFeedRecords(existing, normalized) : normalized);
+  }
+
   // Ships this marks that are outside the display rules appear from the next refresh
   noteSameSpotClusters([...latestReports.values()], now);
   for (const v of byMmsi.values()) {
@@ -1805,6 +1837,12 @@ function allKnownVessels(): any[] {
   for (const v of getBarentsWatchCached() || []) {
     const input = barentsWatchInput(v);
     const n = input && normalizeLiveVessel(input, { ignoreDisplayRules: true });
+    if (!n) continue;
+    const existing = byMmsi.get(n.mmsi);
+    byMmsi.set(n.mmsi, existing ? mergeFeedRecords(existing, n) : n);
+  }
+  for (const v of getDigitrafficVessels()) {
+    const n = normalizeLiveVessel(digitrafficInput(v), { ignoreDisplayRules: true });
     if (!n) continue;
     const existing = byMmsi.get(n.mmsi);
     byMmsi.set(n.mmsi, existing ? mergeFeedRecords(existing, n) : n);
@@ -3311,6 +3349,10 @@ app.listen(PORT, () => {
       .then(() => getLivePositionsList())
       .catch(() => undefined);
   }, BW_LATEST_TTL_MS);
+
+  // Finnish coastal AIS (Gulf of Finland, Gulf of Bothnia), open data from Fintraffic
+  refreshDigitraffic().then(() => console.log('[digitraffic] vessels', getDigitrafficStatus().vessels));
+  setInterval(() => void refreshDigitraffic(), DIGITRAFFIC_REFRESH_MS);
 
   // Daily ice-edge refresh (06:30) + startup if missing/stale (>36h)
   cron.schedule('30 6 * * *', () => {

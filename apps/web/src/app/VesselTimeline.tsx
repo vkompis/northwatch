@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
-import type { VesselScrub, VesselTrack } from '@svalmap/ui';
+import { SNAPSHOT_MODE, type VesselScrub, type VesselTrack } from '@svalmap/ui';
 
 const RANGES = [
   { days: 1, label: '24 h' },
@@ -495,7 +495,12 @@ export default function VesselTimeline({
             {EVENT_STYLE[type].label}
           </span>
         ))}
-        <span className="vt-source">BarentsWatch history · Norwegian waters</span>
+        <span className="vt-source">
+          {/* The static copy adds each run's position (writeSiteSnapshot.ts), e.g. from Digitraffic */}
+          {SNAPSHOT_MODE
+            ? 'BarentsWatch history · positions saved every 30 min'
+            : 'BarentsWatch history · Norwegian waters'}
+        </span>
       </div>
     </section>
   );

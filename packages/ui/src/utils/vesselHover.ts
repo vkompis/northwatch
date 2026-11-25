@@ -56,7 +56,8 @@ function sourceLabel(source: string | null | undefined): string {
   const s = String(source || '').toLowerCase();
   if (!s) return '';
   if (s.includes('aisstream')) return 'AISStream';
-  if (s.includes('barents') || s.includes('kyst')) return 'coastal station';
+  if (s.includes('barents') || s.includes('bw') || s.includes('kyst')) return 'coastal station';
+  if (s.includes('digitraffic')) return 'Finnish coastal station';
   if (s.includes('gfw')) return 'Global Fishing Watch';
   return source as string;
 }

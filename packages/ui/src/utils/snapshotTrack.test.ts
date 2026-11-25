@@ -28,7 +28,7 @@ const answer = (hoursAgo: number[], spoofing: any[] = []) => ({
   assert.equal(s.points[0][1], 30.12346);
 }
 
-// The new day replaces the overlap; anything older than 14 days drops off
+// Both tracks are kept; anything older than 14 days drops off
 {
   const prev = storedFromApi('1', answer([15 * 24, 10 * 24, 30, 20, 2]), now - HOUR);
   prev.spoofing = [
@@ -39,7 +39,7 @@ const answer = (hoursAgo: number[], spoofing: any[] = []) => ({
   const merged = mergeStoredTracks(prev, next, now);
   assert.deepEqual(
     merged.points.map((p) => (now - p[0] * 1000) / HOUR),
-    [10 * 24, 30, 23, 10, 0]
+    [10 * 24, 30, 23, 20, 10, 2, 0]
   );
   assert.deepEqual(merged.spoofing, [{ kind: 'jumps', text: 'jump', at: at(10) }]);
   // A fetch with no positions keeps the history
@@ -59,6 +59,18 @@ const answer = (hoursAgo: number[], spoofing: any[] = []) => ({
   const week = apiFromStored(stored, 7, now);
   assert.equal(week.line.geometry.coordinates.length, 3);
   assert.equal(week.meta.spoofing.length, 1);
+}
+
+// The same day fetched again at other minutes is thinned back to one fix per step
+{
+  const quarter = 0.25;
+  const prev = storedFromApi('1', answer([3, 3 - quarter, 3 - 2 * quarter]), now);
+  const next = storedFromApi('1', answer([3 - 0.1, 3 - quarter - 0.1, 2]), now);
+  const merged = mergeStoredTracks(prev, next, now);
+  assert.deepEqual(
+    merged.points.map((p) => +((now - p[0] * 1000) / HOUR).toFixed(2)),
+    [3, 2.75, 2.5, 2]
+  );
 }
 
 console.log('snapshotTrack.test.ts: ok');

@@ -220,8 +220,9 @@ export default function HomePage() {
     process.env.NEXT_PUBLIC_MAP_STYLE || `${BASE_PATH}/styles/svalmap-dark.json`;
   const attribution =
     process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ||
-    // Basemap credit (OpenFreeMap · OpenMapTiles · OpenStreetMap) comes from the style source
-    'AIS: BarentsWatch, AISStream · Events: Global Fishing Watch';
+    // Default set in next.config.js; the basemap credit (OpenFreeMap · OpenMapTiles ·
+    // OpenStreetMap) comes from the style source
+    '';
   const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY || '';
   // If style URL is MapTiler without ?key=, append it
   const mapStyleWithKey =
@@ -743,7 +744,7 @@ export default function HomePage() {
         <>
             <LayerRow
               label="Live ships"
-              sub="AISStream + BarentsWatch · every 2 min"
+              sub="AISStream, BarentsWatch, Digitraffic · every 2 min"
               count={liveVessels.length || null}
               checked={shipsVisible}
               onChange={setShipsVisible}
@@ -800,7 +801,8 @@ export default function HomePage() {
                 registered vessels except fishing under 15&nbsp;m and recreational under 45&nbsp;m
                 (when length is known). Elsewhere in the North Atlantic north of 54°N: Russian
                 vessels, curated research vessels, shadow fleet, sanctioned vessels, and military /
-                law enforcement. Live AIS via AISStream + BarentsWatch (~20&nbsp;s refresh). Fishing-gear
+                law enforcement. Live AIS via AISStream, BarentsWatch and Digitraffic (Finnish coastal
+                stations: Gulf of Finland, Gulf of Bothnia). Fishing-gear
                 buoys and other AIS beacons are hidden by default (Ship filters → Ship type).
               </div>
             )}

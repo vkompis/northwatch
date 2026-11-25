@@ -13,7 +13,9 @@ const nextConfig = {
     MAP_BASE_URL: process.env.MAP_BASE_URL,
     MAP_ATTRIBUTION: process.env.MAP_ATTRIBUTION,
     NEXT_PUBLIC_MAP_STYLE: process.env.NEXT_PUBLIC_MAP_STYLE || `${basePath}/styles/svalmap-dark.json`,
-    NEXT_PUBLIC_MAP_ATTRIBUTION: process.env.NEXT_PUBLIC_MAP_ATTRIBUTION || 'AIS: BarentsWatch, AISStream · Events: Global Fishing Watch',
+    NEXT_PUBLIC_MAP_ATTRIBUTION:
+      process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ||
+      'AIS: BarentsWatch, AISStream, <a href="https://www.digitraffic.fi/en/marine-traffic/" target="_blank" rel="noopener">Fintraffic / digitraffic.fi</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>) · Events: Global Fishing Watch',
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8787',
   },
   async headers() {

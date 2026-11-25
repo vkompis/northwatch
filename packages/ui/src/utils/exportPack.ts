@@ -15,6 +15,7 @@ export function defaultProvenance(extraSources: string[] = []): ProvenanceBlock 
     sources: [
       'AISStream live AIS',
       'BarentsWatch AIS (live + historic ≤14d)',
+      'Fintraffic / digitraffic.fi AIS, license CC 4.0 BY',
       'DMA / OpenSanctions / local CSVs (sanctions & shadow)',
       'Global Fishing Watch events API',
       'Kystverket navigation warnings',

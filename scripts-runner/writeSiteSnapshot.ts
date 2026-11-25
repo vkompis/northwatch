@@ -15,6 +15,7 @@ import {
   mergeStoredTracks,
   STORED_TRACK_DAYS,
   storedFromApi,
+  type StoredFix,
   type StoredTrack,
 } from '../packages/ui/src/utils/snapshotTrack';
 
@@ -58,16 +59,25 @@ async function capture(url: string): Promise<{ status: number; body: any }> {
   return last;
 }
 
-/** A track saved less than this long ago only needs the last day added */
+/** A track BarentsWatch answered for less than this long ago only needs the last day added */
 const TRACK_TOP_UP_MS = 20 * 3600e3;
-/** A cached track not updated for this long belongs to a ship no longer on the map */
-const TRACK_FORGET_MS = 2 * 24 * 3600e3;
-const TRACK_SHIPS_MAX = 120;
+const TRACK_SHIPS_MAX = 150;
+
+/** The ship's position in this snapshot as a track fix (not a GFW last-seen position) */
+function liveFix(v: any): StoredFix | null {
+  const t = Date.parse(String(v.timestamp ?? ''));
+  if (v.lastSeenOnly || !Number.isFinite(t) || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) return null;
+  const n = (x: unknown) => (x != null && x !== '' && Number.isFinite(Number(x)) ? Number(x) : null);
+  return [Math.round(t / 1000), Number(v.lon.toFixed(5)), Number(v.lat.toFixed(5)), n(v.speed), n(v.course)];
+}
 
 /**
- * Saves the BarentsWatch track of each flagged or research ship at api/tracks/<mmsi>
- * (packages/ui/src/utils/snapshotTrack.ts). The last run's tracks wait in
- * data/cache/site-tracks (kept by pages.yml), so a run only asks for the last day.
+ * Saves the track of each flagged or research ship at api/tracks/<mmsi>
+ * (packages/ui/src/utils/snapshotTrack.ts): BarentsWatch history in Norwegian
+ * waters, plus the position each run sees, so ships the other feeds hear (the
+ * Baltic through Digitraffic, open sea through AISStream) get a track too. The
+ * last run's tracks wait in data/cache/site-tracks (kept by pages.yml), so a run
+ * only asks BarentsWatch for the last day.
  */
 async function writeTracks(base: string, outDir: string, vessels: any[]): Promise<void> {
   const cacheDir = dataCache('site-tracks');
@@ -94,17 +104,33 @@ async function writeTracks(base: string, outDir: string, vessels: any[]): Promis
       }
       const topUp = prev && now - Date.parse(prev.updated) < TRACK_TOP_UP_MS;
       const q = new URLSearchParams({ mmsi: v.mmsi, days: String(topUp ? 1 : STORED_TRACK_DAYS), interval: '15' });
-      let track = prev;
-      try {
-        const { status, body } = await getJson(`${base}/api/tracks24h?${q}`);
-        if (status !== 200) throw new Error(`${status} ${body?.error || ''}`.trim());
-        track = mergeStoredTracks(prev, storedFromApi(v.mmsi, body, now), now);
-        fs.writeFileSync(cached, JSON.stringify(track));
-      } catch (e: any) {
-        failed++;
-        firstError ||= e?.message || String(e);
+      // BarentsWatch only knows Norwegian waters. The first 14 days show whether a ship now in the
+      // Baltic was off Norway lately; after that, ask only while BarentsWatch hears the ship.
+      const askBw = !prev || !(Date.parse(prev.updated) > 0) || /barentswatch|\bbw\b/.test(String(v.source));
+      let fetched: StoredTrack | null = null;
+      if (askBw) {
+        try {
+          const { status, body } = await getJson(`${base}/api/tracks24h?${q}`);
+          if (status !== 200) throw new Error(`${status} ${body?.error || ''}`.trim());
+          fetched = storedFromApi(v.mmsi, body, now);
+        } catch (e: any) {
+          failed++;
+          firstError ||= e?.message || String(e);
+        }
       }
-      if (track?.points.length) {
+      const fix = liveFix(v);
+      const next: StoredTrack = fetched || {
+        mmsi: v.mmsi,
+        intervalMin: prev?.intervalMin || 15,
+        updated: prev?.updated || new Date(0).toISOString(),
+        spoofing: [],
+        points: [],
+      };
+      if (fix) next.points.push(fix);
+      const track = mergeStoredTracks(prev, next, now);
+      fs.writeFileSync(cached, JSON.stringify(track));
+      // One position is not a track yet
+      if (track.points.length >= 2) {
         fs.writeFileSync(path.join(outTracks, v.mmsi), JSON.stringify(track));
         published++;
       }
@@ -112,11 +138,13 @@ async function writeTracks(base: string, outDir: string, vessels: any[]): Promis
   }
   await Promise.all([1, 2, 3].map(worker));
 
+  // A ship gone from the map keeps its track until its last position is 14 days old
   for (const name of fs.readdirSync(cacheDir)) {
     const file = path.join(cacheDir, name);
     try {
-      const { updated } = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (now - Date.parse(updated) < TRACK_FORGET_MS) continue;
+      const { points } = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const last = points?.[points.length - 1]?.[0];
+      if (last * 1000 > now - STORED_TRACK_DAYS * 24 * 3600e3) continue;
     } catch {
       /* unreadable: drop it */
     }

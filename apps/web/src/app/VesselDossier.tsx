@@ -12,12 +12,22 @@ import {
 } from '@svalmap/ui';
 import { MasterMarker, SANCTION_EDGE, SHADOW_EDGE, SpoofMarker, TriangleMarker, WarningMarker } from './LayerRow';
 
-const SOURCE_LABELS: Record<string, string> = {
+const FEED_NAMES: Record<string, string> = {
   aisstream: 'AISStream',
   barentswatch: 'BarentsWatch',
-  'aisstream+bw': 'AISStream + BarentsWatch',
-  gfw: 'Global Fishing Watch (last known position, not live)',
+  bw: 'BarentsWatch',
+  digitraffic: 'Digitraffic (Finnish coastal stations)',
 };
+
+/** "aisstream+digitraffic" → "AISStream + Digitraffic (…)" */
+function sourceLabel(source: string | null | undefined): string {
+  if (!source) return 'search (not in the live feed)';
+  if (source === 'gfw') return 'Global Fishing Watch (last known position, not live)';
+  return source
+    .split('+')
+    .map((p) => FEED_NAMES[p] || p)
+    .join(' + ');
+}
 
 function ago(iso: string | null): string {
   const t = iso ? Date.parse(iso) : NaN;
@@ -549,7 +559,7 @@ export default function VesselDossier({
         ))}
       </div>
       <p className="dossier-note">
-        Position via {SOURCE_LABELS[v.source || ''] || (v.source ? v.source : 'search (not in the live feed)')}
+        Position via {sourceLabel(v.source)}
       </p>
 
       <label className="dossier-notefield">
