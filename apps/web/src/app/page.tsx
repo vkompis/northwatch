@@ -53,6 +53,7 @@ import {
   BASE_PATH,
   SNAPSHOT_MODE,
   SNAPSHOT_AT,
+  loadSnapshotTrack,
 } from '@svalmap/ui';
 import VesselFilterPanel from './VesselFilterPanel';
 import MapMenu, { MENU_ICONS, type MapMenuId, type MapMenuItem } from './MapMenu';
@@ -1184,6 +1185,9 @@ export default function HomePage() {
           {aisStatus.trackStatus === 'error' && aisStatus.trackError && (
             <span className="chrome-hint warn">{aisStatus.trackError}</span>
           )}
+          {aisStatus.trackStatus === 'none' && (
+            <span className="chrome-hint">Tracks are kept for flagged ships only</span>
+          )}
           {/* A home-screen app on iPhone has no browser reload, and the snapshot only changes on reload */}
           {SNAPSHOT_MODE && (
             <button
@@ -1298,7 +1302,7 @@ export default function HomePage() {
         />
       </div>
 
-      {selVessel && !SNAPSHOT_MODE && (
+      {selVessel && aisStatus.trackStatus !== 'none' && (
         <VesselTimeline
           apiBase={apiBase}
           mmsi={selVessel.mmsi}
@@ -1377,15 +1381,17 @@ export default function HomePage() {
                 }
                 onExport={async () => {
                   let track: any = null;
-                  if (!SNAPSHOT_MODE) {
-                    try {
+                  try {
+                    if (SNAPSHOT_MODE) {
+                      track = await loadSnapshotTrack(apiBase, selectedVessel.mmsi, trackDays);
+                    } else {
                       const r = await fetch(
                         `${apiBase}/api/tracks24h?mmsi=${encodeURIComponent(selectedVessel.mmsi)}&days=${trackDays}&interval=15`
                       );
                       track = await r.json();
-                    } catch {
-                      /* ignore */
                     }
+                  } catch {
+                    /* ignore */
                   }
                   exportVesselPack({
                     vessel: selectedVessel as any,

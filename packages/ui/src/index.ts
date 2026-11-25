@@ -56,6 +56,7 @@ export type {
 } from './utils/areaAlerts';
 export { pointInGeoJSON, pointInGeometry } from './utils/geo';
 export { BASE_PATH, SNAPSHOT_MODE, SNAPSHOT_AT } from './utils/siteMode';
+export { loadSnapshotTrack } from './utils/snapshotTrack';
 
 // UI components
 export { default as VesselMarker } from './components/VesselMarker';

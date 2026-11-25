@@ -10,7 +10,13 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { dataSource, ensureDir } from './paths';
+import { dataCache, dataSource, ensureDir } from './paths';
+import {
+  mergeStoredTracks,
+  STORED_TRACK_DAYS,
+  storedFromApi,
+  type StoredTrack,
+} from '../packages/ui/src/utils/snapshotTrack';
 
 /** Requests the map makes on load, with the query it sends. */
 const ENDPOINTS = [
@@ -50,6 +56,76 @@ async function capture(url: string): Promise<{ status: number; body: any }> {
     last = await getJson(url);
   }
   return last;
+}
+
+/** A track saved less than this long ago only needs the last day added */
+const TRACK_TOP_UP_MS = 20 * 3600e3;
+/** A cached track not updated for this long belongs to a ship no longer on the map */
+const TRACK_FORGET_MS = 2 * 24 * 3600e3;
+const TRACK_SHIPS_MAX = 120;
+
+/**
+ * Saves the BarentsWatch track of each flagged or research ship at api/tracks/<mmsi>
+ * (packages/ui/src/utils/snapshotTrack.ts). The last run's tracks wait in
+ * data/cache/site-tracks (kept by pages.yml), so a run only asks for the last day.
+ */
+async function writeTracks(base: string, outDir: string, vessels: any[]): Promise<void> {
+  const cacheDir = dataCache('site-tracks');
+  const outTracks = path.join(outDir, 'api/tracks');
+  ensureDir(cacheDir);
+  ensureDir(outTracks);
+  const now = Date.now();
+  const queue = vessels
+    .filter((v) => v.sanctioned || v.shadowfleet || v.sanctionedMaster || v.research)
+    .slice(0, TRACK_SHIPS_MAX);
+  const ships = queue.length;
+  let published = 0;
+  let failed = 0;
+  let firstError = '';
+
+  async function worker() {
+    for (let v = queue.shift(); v; v = queue.shift()) {
+      const cached = path.join(cacheDir, `${v.mmsi}.json`);
+      let prev: StoredTrack | null = null;
+      try {
+        prev = JSON.parse(fs.readFileSync(cached, 'utf8'));
+      } catch {
+        /* first time this ship is saved */
+      }
+      const topUp = prev && now - Date.parse(prev.updated) < TRACK_TOP_UP_MS;
+      const q = new URLSearchParams({ mmsi: v.mmsi, days: String(topUp ? 1 : STORED_TRACK_DAYS), interval: '15' });
+      let track = prev;
+      try {
+        const { status, body } = await getJson(`${base}/api/tracks24h?${q}`);
+        if (status !== 200) throw new Error(`${status} ${body?.error || ''}`.trim());
+        track = mergeStoredTracks(prev, storedFromApi(v.mmsi, body, now), now);
+        fs.writeFileSync(cached, JSON.stringify(track));
+      } catch (e: any) {
+        failed++;
+        firstError ||= e?.message || String(e);
+      }
+      if (track?.points.length) {
+        fs.writeFileSync(path.join(outTracks, v.mmsi), JSON.stringify(track));
+        published++;
+      }
+    }
+  }
+  await Promise.all([1, 2, 3].map(worker));
+
+  for (const name of fs.readdirSync(cacheDir)) {
+    const file = path.join(cacheDir, name);
+    try {
+      const { updated } = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (now - Date.parse(updated) < TRACK_FORGET_MS) continue;
+    } catch {
+      /* unreadable: drop it */
+    }
+    fs.rmSync(file, { force: true });
+  }
+  console.log(
+    `[snapshot] tracks for ${published} of ${ships} flagged ships` +
+      (failed ? `; ${failed} fetches failed (first: ${firstError})` : '')
+  );
 }
 
 async function main() {
@@ -94,6 +170,8 @@ async function main() {
   ensureDir(path.join(outDir, 'api/sanctions'));
   fs.writeFileSync(path.join(outDir, 'api/sanctions/lookups'), JSON.stringify(lookups));
   console.log(`[snapshot] list entries for ${Object.keys(lookups).length} flagged ships`);
+
+  await writeTracks(base, outDir, vessels);
 
   fs.cpSync(dataSource('overlays'), path.join(outDir, 'overlays'), { recursive: true });
   console.log('[snapshot] copied overlays');

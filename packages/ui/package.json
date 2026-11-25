@@ -10,7 +10,7 @@
     "clean": "rm -rf dist",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
-    "test": "tsx src/utils/vesselCategory.test.ts && tsx src/utils/vesselFilters.test.ts && tsx src/utils/areaAlerts.test.ts && tsx src/utils/terrarium.test.ts && tsx src/utils/navWarningGeometry.test.ts && tsx src/utils/kartverketRelief.test.ts && tsx src/utils/tileCache.test.ts"
+    "test": "tsx src/utils/vesselCategory.test.ts && tsx src/utils/vesselFilters.test.ts && tsx src/utils/areaAlerts.test.ts && tsx src/utils/terrarium.test.ts && tsx src/utils/navWarningGeometry.test.ts && tsx src/utils/snapshotTrack.test.ts && tsx src/utils/kartverketRelief.test.ts && tsx src/utils/tileCache.test.ts"
   },
   "dependencies": {
     "@svalmap/config": "workspace:*",

@@ -26,6 +26,7 @@ import type { MapTheme } from '../utils/kartverketRelief';
 import { MAP_FONT_BOLD, MAP_FONT_REGULAR } from '../utils/mapFonts';
 import { CLICK_PRIORITY, offerClick } from '../utils/clickPriority';
 import { BASE_PATH, SNAPSHOT_MODE } from '../utils/siteMode';
+import { loadSnapshotTrack } from '../utils/snapshotTrack';
 
 export type VesselFeatureProps = {
   mmsi: string;
@@ -96,7 +97,8 @@ export type VesselLayerStatus = {
   vesselCount: number;
   lastUpdate: string | null;
   error: string | null;
-  trackStatus: 'idle' | 'loading' | 'ready' | 'error';
+  /** `none`: the static copy saved no track for this ship */
+  trackStatus: 'idle' | 'loading' | 'ready' | 'error' | 'none';
   trackError: string | null;
   trackDays?: number;
 };
@@ -1167,8 +1169,7 @@ export default function VesselLayer({
     }
 
     async function showTrack(mmsi: string) {
-      // A snapshot has no track API to ask
-      if (!mmsi || SNAPSHOT_MODE) return;
+      if (!mmsi) return;
       ensureTrackLayers();
       const days = Math.max(1, Math.min(14, trackDaysRef.current || 1));
       // Always refetch when days change even for same MMSI
@@ -1177,14 +1178,25 @@ export default function VesselLayer({
       emitStatus({ trackStatus: 'loading', trackError: null, trackDays: days });
       const controller = new AbortController();
       trackAbort = controller;
-      const intervalMin = days > 3 ? 30 : 15;
+      let intervalMin = days > 3 ? 30 : 15;
       try {
-        const { data } = await axios.get(`${apiBase}/api/tracks24h`, {
-          params: { mmsi, interval: intervalMin, days },
-          timeout: 60000,
-          signal: controller.signal as any,
-        });
+        // The static copy has no API to ask; it saved the flagged ships' tracks
+        const data = SNAPSHOT_MODE
+          ? await loadSnapshotTrack(apiBase, mmsi, days, controller.signal)
+          : (
+              await axios.get(`${apiBase}/api/tracks24h`, {
+                params: { mmsi, interval: intervalMin, days },
+                timeout: 60000,
+                signal: controller.signal as any,
+              })
+            ).data;
         if (destroyed || activeTrackMmsi !== mmsi) return;
+        if (!data) {
+          onTrackRef.current?.({ mmsi, days, intervalMin, points: [] });
+          emitStatus({ trackStatus: 'none', trackError: null });
+          return;
+        }
+        if (SNAPSHOT_MODE) intervalMin = data.meta.intervalMin;
         const features: any[] = [];
         const coords = data?.line?.geometry?.coordinates;
         if (Array.isArray(coords) && coords.length >= 2) {
@@ -1249,7 +1261,7 @@ export default function VesselLayer({
           trackDays: days,
         });
       } catch (e: any) {
-        if (e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') return;
+        if (e?.name === 'CanceledError' || e?.name === 'AbortError' || e?.code === 'ERR_CANCELED') return;
         console.warn('[VesselLayer] track fetch failed', mmsi, e?.message || e);
         onTrackRef.current?.({ mmsi, days, intervalMin, points: [] });
         emitStatus({ trackStatus: 'error', trackError: e?.message || 'Track unavailable' });
