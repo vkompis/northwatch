@@ -1679,7 +1679,6 @@ export default function VesselLayer({
             'nav-warnings-route',
             'nav-warnings-route-hit',
             'nav-warnings-point',
-            'nav-warnings-area-marker',
             'nav-warnings-label',
             'ships-hit',
             'vessel-projection-rings',
