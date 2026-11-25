@@ -16,8 +16,8 @@ export default function HowToUse() {
       <h3>Ships on the map</h3>
       <p>
         Inside the Norwegian and Jan Mayen zones and the Svalbard zone you see all registered
-        ships. Further out you only see Russian, sanctioned, shadow-fleet, research and military
-        ships, and ships with signs of AIS spoofing. Russian research ships are followed anywhere
+        ships. Further out and in the Baltic you only see Russian, sanctioned, shadow-fleet,
+        research and military ships, and ships with signs of AIS spoofing. Russian research ships are followed anywhere
         in the world. Finnish coastal stations (Fintraffic's Digitraffic) add the Gulf of Finland,
         with the Russian oil ports, and the Gulf of Bothnia. Colour shows the flag; zoomed in, the
         triangle points where the ship is heading.

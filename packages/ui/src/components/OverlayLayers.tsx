@@ -41,6 +41,9 @@ export type OverlayVisibility = {
   ports: boolean;
   airports: boolean;
   'ice-edge': boolean;
+  /** HELCOM's yearly AIS shipping density in the Baltic: all ships, and tankers only */
+  'traffic-density': boolean;
+  'tanker-density': boolean;
   /** All currently in-force Kystverket warnings */
   navwarnings: boolean;
   /** In-force warnings issued within the last 30 days */
@@ -293,6 +296,28 @@ const maritimeInfraTiles = (layers: string) =>
   'https://wms.geonorge.no/skwms1/wms.maritim_infrastruktur?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
   `&LAYERS=${layers}&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=512&HEIGHT=512` +
   '&FORMAT=image/png&TRANSPARENT=true';
+
+/**
+ * HELCOM's AIS shipping density for 2024, the Baltic and Kattegat on a 1 km grid, as map
+ * images from its open map service. Free for public use with HELCOM cited as the source.
+ * https://maps.helcom.fi/website/mapservice/
+ */
+const HELCOM_DENSITY: { key: 'traffic-density' | 'tanker-density'; layer: number }[] = [
+  { key: 'traffic-density', layer: 345 },
+  { key: 'tanker-density', layer: 341 },
+];
+/**
+ * HELCOM draws little traffic pale pink and a lot dark red, made for a light map. On the dark map
+ * min > max flips brightness, so quiet sea fades into the water and the lanes glow; flipping
+ * also turns red to cyan, which the hue rotation turns back.
+ */
+const densityPaint = (theme: MapTheme) =>
+  theme === 'dark'
+    ? { 'raster-opacity': 0.9, 'raster-brightness-min': 0.95, 'raster-brightness-max': 0.1, 'raster-hue-rotate': 180 }
+    : { 'raster-opacity': 0.75, 'raster-brightness-min': 0, 'raster-brightness-max': 1, 'raster-hue-rotate': 0 };
+const helcomDensityTiles = (layer: number) =>
+  'https://maps.helcom.fi/arcgis/rest/services/MADS/Shipping/MapServer/export?bbox={bbox-epsg-3857}' +
+  `&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&layers=show:${layer}&f=image`;
 
 const KV_DEPTH_SOURCE = 'overlay-bathymetry-kartverket';
 const KV_DEPTH_MINZOOM = 13.5;
@@ -1165,6 +1190,8 @@ export default function OverlayLayers({
       } catch (e) {
         console.error('[OverlayLayers]', e);
       } finally {
+        // Needs no API, so it comes even when a load above failed
+        if (!cancelled) addHelcomDensity();
         booting = false;
       }
     }
@@ -1195,6 +1222,34 @@ export default function OverlayLayers({
               'raster-fade-duration': 0,
               ...chartInkPaint(invertOnDark, themeRef.current),
             },
+          },
+          beforeIdForBathymetry(map)
+        );
+      }
+    }
+
+    // Under the other overlays: background for where ships usually go
+    function addHelcomDensity() {
+      for (const { key, layer } of HELCOM_DENSITY) {
+        const sourceId = `overlay-${key}`;
+        if (!mapStyleReady(map) || map.getSource(sourceId)) continue;
+        registerCachedTileProtocol();
+        map.addSource(sourceId, {
+          type: 'raster',
+          tiles: [cachedTileUrl(helcomDensityTiles(layer))],
+          tileSize: 256,
+          maxzoom: 11,
+          bounds: [9, 53, 31, 66.5],
+          attribution:
+            'Traffic density 2024: <a href="https://maps.helcom.fi/website/mapservice/" target="_blank" rel="noopener">HELCOM</a>',
+        } as any);
+        map.addLayer(
+          {
+            id: `${sourceId}-raster`,
+            type: 'raster',
+            source: sourceId,
+            layout: { visibility: vis(visibilityRef.current[key]) },
+            paint: { 'raster-fade-duration': 0, ...densityPaint(themeRef.current) },
           },
           beforeIdForBathymetry(map)
         );
@@ -1466,6 +1521,9 @@ export default function OverlayLayers({
         paint(`overlay-${key}-raster`, prop, value);
       }
     }
+    for (const { key } of HELCOM_DENSITY) {
+      for (const [prop, value] of Object.entries(densityPaint(theme))) paint(`overlay-${key}-raster`, prop, value);
+    }
     paint('overlay-bathymetry-soundings', 'text-color', BATHY_THEME[theme].sounding);
     paint('overlay-bathymetry-soundings', 'text-halo-color', BATHY_THEME[theme].halo);
     paint('overlay-tg-landings-circle', 'circle-color', LANDING_THEME[theme].circle);
@@ -1558,6 +1616,11 @@ export default function OverlayLayers({
     }
     for (const lid of SEABED_LAYERS) {
       if (safeGetLayer(map, lid)) map.setLayoutProperty(lid, 'visibility', vis(visibility['seabed-relief']));
+    }
+    for (const { key } of HELCOM_DENSITY) {
+      if (safeGetLayer(map, `overlay-${key}-raster`)) {
+        map.setLayoutProperty(`overlay-${key}-raster`, 'visibility', vis(visibility[key]));
+      }
     }
     if (visibility.bathymetry) {
       try {
