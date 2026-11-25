@@ -82,6 +82,34 @@ function extentKm([w, s, e, n]: Extent): number {
   return Math.max((e - w) * 111.32 * Math.cos(midLat), (n - s) * 110.57);
 }
 
+const RING_RADIUS_PX = 10;
+/** Zoom levels the ring's fade is worked out at (interpolated in between). */
+const RING_STOPS = Array.from({ length: 25 }, (_, i) => 2 + i * 0.5);
+
+/**
+ * Zoom at which an area `sizeKm` across fills the ring (≈ 24 px); past it the outline
+ * shows on its own and a ring on top would only clutter it.
+ */
+function ringHideZoom(sizeKm: number, lat: number): number {
+  if (!(sizeKm > 0)) return RING_STOPS[RING_STOPS.length - 1];
+  // Metres per pixel at zoom 0 on 512 px tiles: 40 075 016.686 / 512
+  const metresPerPxZ0 = 78271.517 * Math.cos((lat * Math.PI) / 180);
+  return Math.log2((((RING_RADIUS_PX + 2) * 2) * metresPerPxZ0) / (sizeKm * 1000));
+}
+
+/** Full until half a zoom level before the area's hideZoom, gone at it. */
+function ringOpacity(max: number): any {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    ...RING_STOPS.flatMap((z) => [
+      z,
+      ['*', max, ['max', 0, ['min', 1, ['*', 2, ['-', ['to-number', ['get', 'hideZoom']], z]]]]],
+    ]),
+  ];
+}
+
 function propsFromFeature(f: any): NavWarningProps | null {
   const w = warningFromProps(f?.properties || {});
   return w && { ...w, onMap: true };
@@ -257,10 +285,17 @@ export default function IncidentLayer({
           .filter((f: any) => f.geometry.type === 'Polygon')
           .map((f: any) => {
             const [w, s, e, n] = extendExtent(undefined, f.geometry.coordinates) as Extent;
+            const sizeKm = extentKm([w, s, e, n]);
             return {
               type: 'Feature',
               geometry: { type: 'Point', coordinates: [(w + e) / 2, (s + n) / 2] },
-              properties: { ...f.properties, areaMarker: 1, primary: 0, sizeKm: extentKm([w, s, e, n]) },
+              properties: {
+                ...f.properties,
+                areaMarker: 1,
+                primary: 0,
+                sizeKm,
+                hideZoom: ringHideZoom(sizeKm, (s + n) / 2),
+              },
             };
           })
           .filter((f: any) => f.properties.sizeKm < 40);
@@ -326,15 +361,15 @@ export default function IncidentLayer({
             id: `${id}-area-marker`,
             type: 'circle',
             source: id,
-            maxzoom: 9.5,
+            maxzoom: RING_STOPS[RING_STOPS.length - 1],
             filter: buildLayerFilter(`${id}-area-marker`, null),
             paint: {
-              'circle-radius': 10,
+              'circle-radius': RING_RADIUS_PX,
               'circle-color': 'rgba(239, 68, 68, 0.08)',
               'circle-stroke-color': '#f87171',
               'circle-stroke-width': 2,
-              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 8, 1, 9.5, 0],
-              'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.9, 9.5, 0],
+              'circle-opacity': ringOpacity(1),
+              'circle-stroke-opacity': ringOpacity(0.9),
             },
             layout: { visibility: 'none' },
           });
