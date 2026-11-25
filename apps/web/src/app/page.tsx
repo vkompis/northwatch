@@ -1188,7 +1188,13 @@ export default function HomePage() {
             <span className="chrome-hint warn">{aisStatus.trackError}</span>
           )}
           {aisStatus.trackStatus === 'none' && (
-            <span className="chrome-hint">Tracks are kept for flagged ships only</span>
+            <span className="chrome-hint">
+              {/* writeSiteSnapshot.ts saves these ships' tracks; one position is not a track yet */}
+              {selVessel &&
+              (selVessel.sanctioned || selVessel.shadowfleet || selVessel.sanctionedMaster || selVessel.category === 'research')
+                ? 'No track saved yet; it starts with the next update'
+                : 'Tracks are kept for flagged ships only'}
+            </span>
           )}
           {/* A home-screen app on iPhone has no browser reload, and the snapshot only changes on reload */}
           {SNAPSHOT_MODE && (
