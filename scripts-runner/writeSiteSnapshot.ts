@@ -63,10 +63,47 @@ async function capture(url: string): Promise<{ status: number; body: any }> {
 const TRACK_TOP_UP_MS = 20 * 3600e3;
 const TRACK_SHIPS_MAX = 150;
 
-/** The ship's position in this snapshot as a track fix (not a GFW last-seen position) */
+/** No flagged ship (tankers, cargo, tugs, research) does this; a fix reporting it is spoofed */
+const TRACK_MAX_KN = 50;
+/** A spoofing finding this close to the fix makes the fix itself suspect */
+const SPOOF_NEAR_MS = 3600e3;
+/** Saved fixes this close to a spoofed position are the same fake spot */
+const FAKE_SPOT_KM = 3;
+
+function km(a: [number, number], b: [number, number]): number {
+  const rad = Math.PI / 180;
+  const dLat = (b[1] - a[1]) * rad;
+  const dLon = (b[0] - a[0]) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * rad) * Math.cos(b[1] * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+/** The live position is spoofed when the spoofing checks found something around its time */
+function spoofedNow(v: any): boolean {
+  const t = Date.parse(String(v.timestamp ?? ''));
+  return (Array.isArray(v.spoofing) ? v.spoofing : []).some(
+    (r: any) => Number.isFinite(t) && Math.abs(Date.parse(r?.at) - t) <= SPOOF_NEAR_MS
+  );
+}
+
+/**
+ * Drops fixes no real ship reports (an impossible speed) and, while the ship is spoofed, the
+ * fixes saved at its fake spot. GPS spoofing in the Gulf of Finland puts ships hundreds of km
+ * inland, and a track through them would draw lines across Russia.
+ */
+function withoutFakeFixes(track: StoredTrack, fakeSpot: [number, number] | null): StoredTrack {
+  const points = track.points.filter(
+    (p) => !(p[3] != null && p[3] >= TRACK_MAX_KN) && !(fakeSpot && km([p[1], p[2]], fakeSpot) <= FAKE_SPOT_KM)
+  );
+  return points.length === track.points.length ? track : { ...track, points };
+}
+
+/** The ship's position in this snapshot as a track fix (not a GFW last-seen or spoofed position) */
 function liveFix(v: any): StoredFix | null {
   const t = Date.parse(String(v.timestamp ?? ''));
-  if (v.lastSeenOnly || !Number.isFinite(t) || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) return null;
+  if (v.lastSeenOnly || spoofedNow(v) || !Number.isFinite(t) || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) {
+    return null;
+  }
   const n = (x: unknown) => (x != null && x !== '' && Number.isFinite(Number(x)) ? Number(x) : null);
   return [Math.round(t / 1000), Number(v.lon.toFixed(5)), Number(v.lat.toFixed(5)), n(v.speed), n(v.course)];
 }
@@ -127,7 +164,8 @@ async function writeTracks(base: string, outDir: string, vessels: any[]): Promis
         points: [],
       };
       if (fix) next.points.push(fix);
-      const track = mergeStoredTracks(prev, next, now);
+      const fakeSpot: [number, number] | null = spoofedNow(v) ? [v.lon, v.lat] : null;
+      const track = withoutFakeFixes(mergeStoredTracks(prev, next, now), fakeSpot);
       fs.writeFileSync(cached, JSON.stringify(track));
       // One position is not a track yet
       if (track.points.length >= 2) {
@@ -138,13 +176,15 @@ async function writeTracks(base: string, outDir: string, vessels: any[]): Promis
   }
   await Promise.all([1, 2, 3].map(worker));
 
-  // A ship gone from the map keeps its track until its last position is 14 days old
+  // A ship gone from the map keeps its track until its last position is 14 days old. One with
+  // no position yet (all spoofed, say) stays a day, so BarentsWatch is not asked again each run.
   for (const name of fs.readdirSync(cacheDir)) {
     const file = path.join(cacheDir, name);
     try {
-      const { points } = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const { points, updated } = JSON.parse(fs.readFileSync(file, 'utf8'));
       const last = points?.[points.length - 1]?.[0];
       if (last * 1000 > now - STORED_TRACK_DAYS * 24 * 3600e3) continue;
+      if (!points?.length && now - Date.parse(updated) < 24 * 3600e3) continue;
     } catch {
       /* unreadable: drop it */
     }

@@ -523,6 +523,14 @@ export default function VesselDossier({
             jammed or spoofed, so the position shown may not be where it is. Compare the track and
             satellite images.
           </p>
+          {/* AIS is VHF radio: a coastal station only hears ships within some 40–60 nm */}
+          {String(v.source || '').includes('digitraffic') && (
+            <p>
+              Finnish coastal stations (Digitraffic) heard this report, and they only reach ships in
+              the Gulf of Finland and the northern Baltic. The ship is most likely there, not where
+              its position puts it.
+            </p>
+          )}
         </div>
       )}
 
