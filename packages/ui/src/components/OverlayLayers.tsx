@@ -41,6 +41,8 @@ export type OverlayVisibility = {
   ports: boolean;
   airports: boolean;
   'ice-edge': boolean;
+  /** GPSJam.org areas where aircraft had poor GPS the last full day (GpsInterferenceLayer) */
+  'gps-interference': boolean;
   /** All currently in-force Kystverket warnings */
   navwarnings: boolean;
   /** In-force warnings issued within the last 30 days */

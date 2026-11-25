@@ -94,7 +94,9 @@ export default function HowToUse() {
         contours, zones and the ice edge, plus satellite images of the area you are looking at.{' '}
         <b>Infrastructure</b>: telecom and power cables, pipelines, platforms and ports; the
         sea-chart layers appear as you zoom in. <b>Warnings</b>: navigational warnings in force,
-        with areas drawn from the positions in the text.
+        with areas drawn from the positions in the text, and <b>GPS interference</b> from GPSJam:
+        where aircraft reported poor GPS the last full day, a sign of jamming or spoofing that
+        also hits ships.
       </p>
 
       <h3>Alerts and sharing</h3>

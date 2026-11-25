@@ -26,6 +26,7 @@ const ENDPOINTS = [
   '/api/gfw/events?hours=720',
   '/api/gfw/detections?hours=720',
   '/api/navwarnings?scope=all',
+  '/api/gps-interference',
   '/api/incidents/live',
   '/api/petroleum/moveable',
 ];

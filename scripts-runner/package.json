@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "tsx aisSpoofing.test.ts && tsx digitrafficClient.test.ts && tsx gfwLastSeen.test.ts && tsx sanctionListings.test.ts && tsx zoneIndex.test.ts"
+    "test": "tsx aisSpoofing.test.ts && tsx digitrafficClient.test.ts && tsx gpsJam.test.ts && tsx gfwLastSeen.test.ts && tsx sanctionListings.test.ts && tsx zoneIndex.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +17,7 @@
     "dayjs": "^1.11.13",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "h3-js": "^4.5.0",
     "helmet": "^8.1.0",
     "node-cron": "^4.2.1",
     "nodemailer": "^10.0.10",

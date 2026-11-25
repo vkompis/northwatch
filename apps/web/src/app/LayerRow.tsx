@@ -94,6 +94,15 @@ export function DotMarker({ color, stroke }: { color: string; stroke?: string })
   );
 }
 
+/** A faint area with a solid outline, like the warning and interference areas on the map */
+export function AreaMarker({ color }: { color: string }) {
+  return (
+    <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
+      <rect x="1" y="1" width="12" height="10" rx="1.5" fill={color} fillOpacity="0.25" stroke={color} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 export function LineMarker({ color, dashed = false }: { color: string; dashed?: boolean }) {
   return (
     <svg width="16" height="10" viewBox="0 0 16 10" aria-hidden="true">

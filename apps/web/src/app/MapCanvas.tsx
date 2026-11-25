@@ -7,6 +7,7 @@ import {
   BasemapTheme,
   GfwLayers,
   IncidentLayer,
+  GpsInterferenceLayer,
   AoiDrawLayer,
   type OverlayVisibility,
   type GfwVisibility,
@@ -121,6 +122,7 @@ export default function MapCanvas({
         onPipelineSelect={onPipelineSelect}
         theme={theme}
       />
+      <GpsInterferenceLayer visible={overlays['gps-interference']} />
       <IncidentLayer
         // The feed only has in-force warnings, so "last 30 days" was the same set — one toggle
         showActive={overlays.navwarnings || overlays['navwarnings-30d']}

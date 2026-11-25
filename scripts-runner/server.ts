@@ -29,6 +29,7 @@ import {
 } from './aisstreamClient';
 import { isRussianResearchVessel, RUSSIAN_RESEARCH_VESSELS } from './russianResearchVessels';
 import { dataSource } from './paths';
+import { getGpsInterference } from './gpsJam';
 import {
   DIGITRAFFIC_REFRESH_MS,
   getDigitrafficStatus,
@@ -958,6 +959,13 @@ async function fetchNavWarningsGeoJSON(): Promise<{
     },
   };
 }
+
+/** Yesterday's GPS interference areas from GPSJam.org (gpsJam.ts) */
+app.get('/api/gps-interference', async (_req, res) => {
+  const data = await getGpsInterference();
+  if (!data) return res.status(503).json({ error: 'GPSJam not reachable', type: 'FeatureCollection', features: [] });
+  res.json(data);
+});
 
 app.get('/api/navwarnings', async (req, res) => {
   try {

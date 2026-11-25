@@ -32,6 +32,7 @@ export {
 } from './components/GfwLayers';
 export type { GfwVisibility, GfwEventProps } from './components/GfwLayers';
 export { default as IncidentLayer } from './components/IncidentLayer';
+export { default as GpsInterferenceLayer } from './components/GpsInterferenceLayer';
 export type { NavWarningProps } from './components/IncidentLayer';
 export { default as AoiDrawLayer } from './components/AoiDrawLayer';
 

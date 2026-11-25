@@ -86,7 +86,7 @@ function copernicusAreaUrl(view: MapView | null): string {
   }
   return `https://browser.dataspace.copernicus.eu/?${params}`;
 }
-import LayerRow, { DotMarker, LineMarker, RingMarker } from './LayerRow';
+import LayerRow, { AreaMarker, DotMarker, LineMarker, RingMarker } from './LayerRow';
 import VesselDossier from './VesselDossier';
 import VesselTimeline from './VesselTimeline';
 
@@ -114,6 +114,7 @@ const DEFAULT_OVERLAYS: OverlayVisibility = {
   ports: false,
   airports: false,
   'ice-edge': false,
+  'gps-interference': false,
   navwarnings: false,
   'navwarnings-30d': false,
 };
@@ -1081,7 +1082,10 @@ export default function HomePage() {
       label: 'Warnings',
       icon: MENU_ICONS.warnings,
       // In force right now when navigation warnings are on; otherwise how many layers are on
-      badge: navOn && navData ? navData.onMap + navData.notices.length : activeCount([overlays.nsm, overlays.skytefelt]),
+      badge:
+        navOn && navData
+          ? navData.onMap + navData.notices.length
+          : activeCount([overlays.nsm, overlays.skytefelt, overlays['gps-interference']]),
       tone: navOn && navData ? 'alert' : undefined,
       title: 'Restrictions & warnings',
       content: (
@@ -1105,6 +1109,13 @@ export default function HomePage() {
               onChange={(on) =>
                 setOverlays((o) => ({ ...o, navwarnings: on, 'navwarnings-30d': false }))
               }
+            />
+            <LayerRow
+              label="GPS interference"
+              sub="GPSJam · aircraft with poor GPS, last full day"
+              marker={<AreaMarker color="#c026d3" />}
+              checked={overlays['gps-interference']}
+              onChange={(on) => setOverlay('gps-interference', on)}
             />
             {(overlays.navwarnings || overlays['navwarnings-30d']) && !!navData?.notices.length && (
               <div className="nav-notices">
