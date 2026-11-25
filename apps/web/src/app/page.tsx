@@ -1331,6 +1331,7 @@ export default function HomePage() {
           track={track}
           loading={aisStatus.trackStatus === 'loading'}
           onScrub={setScrub}
+          onShowDetails={detailDrawerOpen ? undefined : () => setDetailDrawerOpen(true)}
           className={detailDrawerOpen ? 'right-open' : ''}
         />
       )}
@@ -1930,6 +1931,21 @@ export default function HomePage() {
               </>
             );
           })()}
+          {/* Phones: the dossier covers the map and the timeline; this hides it and keeps the ship */}
+          {selection?.kind === 'vessel' && (
+            <button
+              id="detail-hide"
+              type="button"
+              onClick={() => setDetailDrawerOpen(false)}
+              aria-label="Show the map and timeline"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 17l5-5 4 4 8-9" />
+                <path d="M14 7h6v6" />
+              </svg>
+              Timeline
+            </button>
+          )}
           <button
             id="detail-close"
             type="button"

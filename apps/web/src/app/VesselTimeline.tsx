@@ -96,6 +96,7 @@ export default function VesselTimeline({
   track,
   loading,
   onScrub,
+  onShowDetails,
   className = '',
 }: {
   apiBase: string;
@@ -106,6 +107,8 @@ export default function VesselTimeline({
   track: VesselTrack | null;
   loading: boolean;
   onScrub?: (scrub: VesselScrub | null) => void;
+  /** Set while the dossier is hidden (phones): brings it back */
+  onShowDetails?: () => void;
   className?: string;
 }) {
   const [events, setEvents] = useState<GfwEvent[]>([]);
@@ -350,8 +353,11 @@ export default function VesselTimeline({
 
   return (
     <section className={`vessel-timeline ${className}`.trim()} aria-label={`Timeline for ${name}`}>
-      <div className="vt-head">
-        <div className="vt-title">Timeline · {name}</div>
+      <div className={readout ? 'vt-head has-readout' : 'vt-head'}>
+        <div className="vt-title">
+          <span className="vt-title-kicker">Timeline · </span>
+          {name}
+        </div>
         <div className="vt-ranges" role="group" aria-label="Time range">
           {RANGES.map((r) => (
             <button
@@ -382,6 +388,11 @@ export default function VesselTimeline({
             </svg>
           )}
         </button>
+        {onShowDetails && (
+          <button type="button" className="vt-details" onClick={onShowDetails}>
+            Details
+          </button>
+        )}
         {readout ? (
           <span className="vt-readout" aria-live="polite">
             {readout}
