@@ -1892,7 +1892,9 @@ export default function HomePage() {
                       ? w.areaWide
                         ? 'Applies to the whole NAVAREA XIX — no specific position, so it is not drawn on the map.'
                         : 'No position given — not drawn on the map.'
-                      : w.shapeFrom === 'text'
+                      : w.shapeFrom === 'joined'
+                        ? 'Drawn as one area joining the positions in the message. Check against the text before relying on it.'
+                        : w.shapeFrom === 'text'
                         ? 'Drawn from the positions in the message (Kystverket gives them only as loose points). Check against the text before relying on it.'
                         : 'Position from Kystverket; for some warnings it is extracted automatically from the text.'}
                   </div>

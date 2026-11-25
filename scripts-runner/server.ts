@@ -68,7 +68,13 @@ import {
   type SpotReport,
 } from './aisSpoofing';
 import { makeZoneTest, type ZoneTest } from './zoneIndex';
-import { warningPartsFromText } from '../packages/ui/src/utils/navWarningGeometry';
+import {
+  areaFromPoints,
+  isRigList,
+  warningPartsFromText,
+  type LonLat,
+  type WarningPart,
+} from '../packages/ui/src/utils/navWarningGeometry';
 
 const RESEARCH_NAME_BY_MMSI = new Map(
   RUSSIAN_RESEARCH_VESSELS.map((v) => [v.mmsi, v.name] as const)
@@ -826,6 +832,24 @@ function cancelledWarningNumbers(warnings: any[]): Set<string> {
   return out;
 }
 
+const JOIN_MIN_POINTS = 4;
+
+/**
+ * Outline joining a warning's loose positions, when it has at least JOIN_MIN_POINTS and the
+ * text describes no area, route or circle. The text gives them in order; Kystverket's own
+ * MULTIPOINT is sorted by longitude, so those are taken round their centre instead.
+ */
+function joinedArea(parts: WarningPart[], placed: any): LonLat[] | null {
+  if (parts.some((p) => p.shape !== 'points')) return null;
+  const fromText: LonLat[] = parts.flatMap((p) =>
+    p.geometry.type === 'MultiPoint' ? p.geometry.coordinates : p.geometry.type === 'Point' ? [p.geometry.coordinates] : []
+  );
+  if (fromText.length >= JOIN_MIN_POINTS) return areaFromPoints(fromText, true);
+  const bag: LonLat[] = placed?.type === 'MultiPoint' ? placed.coordinates : [];
+  if (bag.length >= JOIN_MIN_POINTS) return areaFromPoints(bag, false);
+  return null;
+}
+
 function withinLastDays(iso: string | null | undefined, daysMs: number): boolean {
   if (!iso) return true; // keep if unknown date
   const t = Date.parse(iso);
@@ -859,11 +883,23 @@ async function fetchNavWarningsGeoJSON(): Promise<{
       const properties = warningProps(w, kind);
       const geometry = parseWktGeometry(w?.position);
       const placed = geometry && !isAreaWideGeometry(geometry) ? geometry : null;
-      const parts = warningPartsFromText(w?.message_en || w?.message_no);
+      const text = w?.message_en || w?.message_no;
+      const parts = warningPartsFromText(text);
       // Kystverket's own polygon is drawn as given. Its points are an unordered bag, so when
       // the text says they bound an area, follow a route or mark a circle, draw that instead;
       // and when it only has the whole-NAVAREA position, use whatever positions the text gives.
       const kystverketArea = placed?.type === 'Polygon' || placed?.type === 'MultiPolygon';
+      // A NAVAREA warning with four or more loose positions is drawn as one area joining them
+      // (a rig list is the exception: those are separate rigs far apart)
+      const joined = kind === 'navarea' && !kystverketArea && !isRigList(text) ? joinedArea(parts, placed) : null;
+      if (joined) {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [joined] },
+          properties: { ...properties, shape: 'area', shapeFrom: 'joined', primary: 1 },
+        });
+        continue;
+      }
       const fromText = placed
         ? !kystverketArea && parts.some((p) => p.shape !== 'points')
         : parts.length > 0;

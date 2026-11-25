@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { findWarningPositions, warningPartsFromText } from './navWarningGeometry.ts';
+import { areaFromPoints, findWarningPositions, isRigList, warningPartsFromText } from './navWarningGeometry.ts';
 
 const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) < eps;
 
@@ -145,6 +145,27 @@ For coordination contact Andoya: Tel +47 940 75 944 or +47 761 44 582. VHF chann
   assert.equal(sea.length, 5);
   assert.ok(near(inner[0][0], 14.683333) && near(inner[0][1], 69.633333));
   assert.ok(near(sea[2][0], 16.066667) && near(sea[2][1], 69.3));
+}
+
+// Loose positions joined into an area: text order kept unless the outline would cross itself
+{
+  const square: [number, number][] = [
+    [10, 69],
+    [12, 69],
+    [12, 70],
+    [10, 70],
+  ];
+  assert.deepEqual(areaFromPoints(square, true), [...square, square[0]]);
+  // Bow-tie order (or Kystverket's longitude-sorted bag) goes round the centre instead
+  const ring = areaFromPoints([square[0], square[2], square[1], square[3]], true)!;
+  assert.equal(ring.length, 5);
+  assert.deepEqual(ring[0], ring[4]);
+  assert.deepEqual(new Set(ring.slice(0, 4).map(String)), new Set(square.map(String)));
+  const diagonal = (a: number[], b: number[]) => a[0] !== b[0] && a[1] !== b[1];
+  for (let i = 0; i < 4; i++) assert.ok(!diagonal(ring[i], ring[i + 1]), 'edge crosses the square');
+  assert.equal(areaFromPoints([square[0], square[1]], false), null);
+  assert.ok(isRigList('Navarea XIX 138/26. Riglist. Correct at 221849 UTC Nov 26'));
+  assert.ok(!isRigList('NAVAREA XIX 139/26. One research rocket launch'));
 }
 
 // Other notations: compact, degree signs, decimal comma, west longitude

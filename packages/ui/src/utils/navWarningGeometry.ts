@@ -135,6 +135,60 @@ function closedRing(points: LonLat[]): LonLat[] | null {
   return [...ring, [...a] as LonLat];
 }
 
+/** True when segments p1–p2 and p3–p4 cross (touching at a shared end does not count). */
+function segmentsCross(p1: LonLat, p2: LonLat, p3: LonLat, p4: LonLat): boolean {
+  const side = (a: LonLat, b: LonLat, c: LonLat) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const d1 = side(p3, p4, p1);
+  const d2 = side(p3, p4, p2);
+  const d3 = side(p1, p2, p3);
+  const d4 = side(p1, p2, p4);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+function selfCrossing(ring: LonLat[]): boolean {
+  const n = ring.length - 1; // closed ring: last = first
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // first and last edge share a corner
+      if (segmentsCross(ring[i], ring[i + 1], ring[j], ring[j + 1])) return true;
+    }
+  }
+  return false;
+}
+
+/** Closed ring through the points in angle order around their centre. */
+function ringByAngle(points: LonLat[]): LonLat[] {
+  const cx = points.reduce((s, p) => s + p[0], 0) / points.length;
+  const cy = points.reduce((s, p) => s + p[1], 0) / points.length;
+  // Scale longitude by latitude so the angles are taken on a roughly true-shaped map
+  const k = Math.cos((cy * Math.PI) / 180);
+  const sorted = [...points].sort(
+    (a, b) => Math.atan2(a[1] - cy, (a[0] - cx) * k) - Math.atan2(b[1] - cy, (b[0] - cx) * k)
+  );
+  return [...sorted, [...sorted[0]] as LonLat];
+}
+
+/**
+ * An area joining loose positions. `ordered` points (as read from the text) are joined in
+ * that order unless the outline would cross itself; otherwise they go round their centre.
+ */
+export function areaFromPoints(points: LonLat[], ordered: boolean): LonLat[] | null {
+  const pts = points.filter(
+    (p, i) => points.findIndex((q) => q[0] === p[0] && q[1] === p[1]) === i
+  );
+  if (pts.length < 3) return null;
+  if (ordered) {
+    const ring = [...pts, [...pts[0]] as LonLat];
+    if (!selfCrossing(ring)) return ring;
+  }
+  return ringByAngle(pts);
+}
+
+/** A list of drilling rigs and their positions: separate places, never one area. */
+export function isRigList(text: string | null | undefined): boolean {
+  return /\bRIG\s*LIST\b|\bRIGGLISTE\b/i.test(text || '');
+}
+
 type Run = { points: LonLat[]; lead: string; tail: string };
 
 /** Group positions into lists: split where other words come between them. */
