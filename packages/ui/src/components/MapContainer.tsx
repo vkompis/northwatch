@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { browserLabelLanguage, localiseStyleLabels } from '../utils/labelLanguage';
 import { MapContext } from '../hooks/useMap';
 import { BASE_PATH } from '../utils/siteMode';
 
@@ -54,7 +55,8 @@ async function resolveMapStyle(
     const res = await fetch(mapStyle, { cache: 'no-cache' });
     if (!res.ok) return mapStyle;
     const json = await res.json();
-    return injectMaptilerKey(json, maptilerKey);
+    // Place names in the visitor's language (Norwegian or English)
+    return localiseStyleLabels(injectMaptilerKey(json, maptilerKey), browserLabelLanguage());
   } catch {
     return mapStyle;
   }
