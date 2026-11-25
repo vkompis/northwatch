@@ -1073,6 +1073,46 @@ body {
   color: #fbbf24;
 }
 
+/* Every map popup is a dark card; maplibre-gl.css loads after this file and paints the tip
+   white, so these are scoped to the map root to outrank it */
+.svalmap-map-root .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.svalmap-map-root .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.svalmap-map-root .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: rgba(15, 23, 42, 0.96);
+}
+.svalmap-map-root .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.svalmap-map-root .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.svalmap-map-root .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: rgba(15, 23, 42, 0.96);
+}
+.svalmap-map-root .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: rgba(15, 23, 42, 0.96);
+}
+.svalmap-map-root .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: rgba(15, 23, 42, 0.96);
+}
+
+/* GPS interference area card: the ship card's frame, the area's violet as the marker */
+.gps-hover .gps-swatch {
+  flex-shrink: 0;
+  width: 18px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 2px;
+  border: 1.5px solid #e879f9;
+  background: rgba(192, 38, 211, 0.4);
+}
+.gps-hover .gps-swatch.medium {
+  border-style: dashed;
+  background: rgba(192, 38, 211, 0.18);
+}
+.gps-hover .gps-body {
+  padding: 8px 12px 10px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* Ship hover card (NAIS-inspired, dark map chrome) */
 .svalmap-ship-hover-popup .maplibregl-popup-content {
   padding: 0;

@@ -16,9 +16,9 @@ const LAYERS = [FILL, LINE_MEDIUM, LINE_HIGH];
 const VIOLET = '#c026d3';
 const VIOLET_LINE = '#e879f9';
 
-const TIP: Record<string, string> = {
-  high: 'over 10 % of aircraft had poor GPS',
-  medium: '2–10 % of aircraft had poor GPS',
+const SHARE: Record<string, string> = {
+  high: 'Over 10 %',
+  medium: '2–10 %',
 };
 
 /** Under the other overlays, warnings and ships */
@@ -73,14 +73,23 @@ export default function GpsInterferenceLayer({ visible = false }: { visible?: bo
           closeButton: false,
           closeOnClick: false,
           offset: 8,
-          className: 'svalmap-ring-hover-popup',
-          maxWidth: '280px',
+          className: 'svalmap-ship-hover-popup',
+          maxWidth: 'none',
         });
       }
       popup
         .setLngLat(e.lngLat)
+        // Card in the style of the ship hover card (vesselHover.ts)
         .setHTML(
-          `<div class="svalmap-ring-tip">GPS interference ${dayLabel(p.date)}: ${TIP[p.level] || ''} · GPSJam</div>`
+          `<div class="svalmap-ship-hover gps-hover">` +
+            `<div class="ssh-head">` +
+            `<span class="gps-swatch ${p.level === 'high' ? 'high' : 'medium'}"></span>` +
+            `<div class="ssh-title"><div class="ssh-name">GPS interference</div>` +
+            `<div class="ssh-meta">${dayLabel(p.date)} · GPSJam.org</div></div>` +
+            `</div>` +
+            `<div class="gps-body">${SHARE[p.level] || ''} of the aircraft passing here reported poor GPS ` +
+            `accuracy, a sign of jamming or spoofing. Ships here may report wrong positions.</div>` +
+            `</div>`
         )
         .addTo(map);
     };
