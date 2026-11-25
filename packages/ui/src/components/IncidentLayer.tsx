@@ -58,7 +58,6 @@ const LAYER_IDS = [
   'nav-warnings-route',
   'nav-warnings-route-hit',
   'nav-warnings-point',
-  'nav-warnings-area-marker',
   'nav-warnings-label',
 ] as const;
 
@@ -74,40 +73,6 @@ function extendExtent(e: Extent | undefined, coords: any): Extent | undefined {
   let out = e;
   for (const c of coords || []) out = extendExtent(out, c);
   return out;
-}
-
-/** Largest side of an extent in km (rough, enough to tell a 3 km range from a 300 km one). */
-function extentKm([w, s, e, n]: Extent): number {
-  const midLat = ((s + n) / 2) * (Math.PI / 180);
-  return Math.max((e - w) * 111.32 * Math.cos(midLat), (n - s) * 110.57);
-}
-
-const RING_RADIUS_PX = 10;
-/** Zoom levels the ring's fade is worked out at (interpolated in between). */
-const RING_STOPS = Array.from({ length: 25 }, (_, i) => 2 + i * 0.5);
-
-/**
- * Zoom at which an area `sizeKm` across fills the ring (≈ 24 px); past it the outline
- * shows on its own and a ring on top would only clutter it.
- */
-function ringHideZoom(sizeKm: number, lat: number): number {
-  if (!(sizeKm > 0)) return RING_STOPS[RING_STOPS.length - 1];
-  // Metres per pixel at zoom 0 on 512 px tiles: 40 075 016.686 / 512
-  const metresPerPxZ0 = 78271.517 * Math.cos((lat * Math.PI) / 180);
-  return Math.log2((((RING_RADIUS_PX + 2) * 2) * metresPerPxZ0) / (sizeKm * 1000));
-}
-
-/** Full until half a zoom level before the area's hideZoom, gone at it. */
-function ringOpacity(max: number): any {
-  return [
-    'interpolate',
-    ['linear'],
-    ['zoom'],
-    ...RING_STOPS.flatMap((z) => [
-      z,
-      ['*', max, ['max', 0, ['min', 1, ['*', 2, ['-', ['to-number', ['get', 'hideZoom']], z]]]]],
-    ]),
-  ];
 }
 
 function propsFromFeature(f: any): NavWarningProps | null {
@@ -280,26 +245,7 @@ export default function IncidentLayer({
           const e = extendExtent(extents.get(key), f.geometry.coordinates);
           if (e) extents.set(key, e);
         }
-        // Small areas are a few pixels at country zoom: mark them with a ring until they show
-        const areaMarkers = drawn
-          .filter((f: any) => f.geometry.type === 'Polygon')
-          .map((f: any) => {
-            const [w, s, e, n] = extendExtent(undefined, f.geometry.coordinates) as Extent;
-            const sizeKm = extentKm([w, s, e, n]);
-            return {
-              type: 'Feature',
-              geometry: { type: 'Point', coordinates: [(w + e) / 2, (s + n) / 2] },
-              properties: {
-                ...f.properties,
-                areaMarker: 1,
-                primary: 0,
-                sizeKm,
-                hideZoom: ringHideZoom(sizeKm, (s + n) / 2),
-              },
-            };
-          })
-          .filter((f: any) => f.properties.sizeKm < 40);
-        const gj = { type: 'FeatureCollection', features: [...drawn, ...areaMarkers] } as any;
+        const gj = { type: 'FeatureCollection', features: drawn } as any;
 
         if (!safeGetSource(map, id)) {
           map.addSource(id, { type: 'geojson', data: gj });
@@ -354,22 +300,6 @@ export default function IncidentLayer({
               'circle-stroke-color': '#fff',
               'circle-opacity': 0.5,
               'circle-stroke-opacity': 0.5,
-            },
-            layout: { visibility: 'none' },
-          });
-          map.addLayer({
-            id: `${id}-area-marker`,
-            type: 'circle',
-            source: id,
-            maxzoom: RING_STOPS[RING_STOPS.length - 1],
-            filter: buildLayerFilter(`${id}-area-marker`, null),
-            paint: {
-              'circle-radius': RING_RADIUS_PX,
-              'circle-color': 'rgba(239, 68, 68, 0.08)',
-              'circle-stroke-color': '#f87171',
-              'circle-stroke-width': 2,
-              'circle-opacity': ringOpacity(1),
-              'circle-stroke-opacity': ringOpacity(0.9),
             },
             layout: { visibility: 'none' },
           });
@@ -464,13 +394,7 @@ function buildLayerFilter(layerId: string, recentFilter: any | null): any {
   } else if (layerId.endsWith('-route') || layerId.endsWith('-route-hit')) {
     geom = ['in', ['geometry-type'], ['literal', ['LineString', 'MultiLineString']]];
   } else if (layerId.endsWith('-point')) {
-    geom = [
-      'all',
-      ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]],
-      ['!=', ['get', 'areaMarker'], 1],
-    ];
-  } else if (layerId.endsWith('-area-marker')) {
-    geom = ['==', ['get', 'areaMarker'], 1];
+    geom = ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]];
   } else if (layerId.endsWith('-label')) {
     // One label per warning, on its main part
     geom = ['!=', ['get', 'primary'], 0];
