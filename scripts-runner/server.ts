@@ -25,6 +25,7 @@ import {
   getAisStreamStatus,
   vesselLengthMeters,
   NORTH_ATLANTIC_BBOX,
+  inWatchArea,
 } from './aisstreamClient';
 import { isRussianResearchVessel, RUSSIAN_RESEARCH_VESSELS } from './russianResearchVessels';
 import { dataSource } from './paths';
@@ -1381,13 +1382,9 @@ function pointInGeom(lon: number, lat: number, geom: any): boolean {
   }
 }
 
+/** The North Atlantic north of 54°N, or the Baltic (aisstreamClient.ts) */
 function inNorthAtlanticBox(lon: number, lat: number): boolean {
-  return (
-    lat >= NORTH_ATLANTIC_BBOX.minLat &&
-    lat <= NORTH_ATLANTIC_BBOX.maxLat &&
-    lon >= NORTH_ATLANTIC_BBOX.minLon &&
-    lon <= NORTH_ATLANTIC_BBOX.maxLon
-  );
+  return inWatchArea(lat, lon);
 }
 
 function isMilitaryShipType(shipType: any): boolean {
@@ -1414,7 +1411,7 @@ function isRecreationalShipType(shipType: any): boolean {
  * Same display rules as before, expanded geographically:
  * - Svalbard FPZ + Norway EEZ + Jan Mayen EEZ: all vessels
  *   (drop fishing <15 m / recreational <45 m when length known)
- * - Rest of North Atlantic north of 54°N:
+ * - Rest of North Atlantic north of 54°N, and the Baltic:
  *   Russian / research / shadow / sanctioned / military only
  */
 function shouldIncludeVessel(opts: {
@@ -2377,8 +2374,9 @@ function gfwMonitorGeometry(): { type: 'Polygon'; coordinates: number[][][] } {
 }
 
 function pointInGfwMonitorBbox(lon: number, lat: number): boolean {
-  // Slightly wider so Barents / coastal Russia AIS-off events are kept
-  return lon >= -15 && lon <= 45 && lat >= 54 && lat <= 82;
+  // Slightly wider so Barents / coastal Russia AIS-off events are kept; 53.5°N takes in the
+  // whole Baltic coast
+  return lon >= -15 && lon <= 45 && lat >= 53.5 && lat <= 82;
 }
 
 function normalizeGfwEventType(raw: unknown): string {

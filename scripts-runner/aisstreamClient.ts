@@ -3,7 +3,7 @@
  * Docs: https://aisstream.io/documentation
  *
  * Keeps an in-memory cache of latest positions + static/voyage fields for the
- * North Atlantic north of 54°N. A second connection follows a short list of ships
+ * North Atlantic north of 54°N and the Baltic. A second connection follows a short list of ships
  * (Russian research vessels) anywhere in the world, filtered on their MMSI. The API key
  * must never be exposed to the browser.
  */
@@ -44,10 +44,30 @@ export const NORTH_ATLANTIC_BBOX = {
   maxLon: 45,
 };
 
+/** The whole Baltic, down to the German and Polish coast (Digitraffic adds Finnish stations). */
+export const BALTIC_BBOX = {
+  minLat: 53.5,
+  maxLat: 66,
+  minLon: 9.5,
+  maxLon: 30.5,
+};
+
+/** Inside either box: where the feeds listen and the display rules apply */
+export function inWatchArea(lat: number, lon: number): boolean {
+  return [NORTH_ATLANTIC_BBOX, BALTIC_BBOX].some(
+    (b) => lat >= b.minLat && lat <= b.maxLat && lon >= b.minLon && lon <= b.maxLon
+  );
+}
+
 /** AISStream docs: each corner is [latitude, longitude]. */
 const SUBSCRIBE_BBOX: [[number, number], [number, number]] = [
   [NORTH_ATLANTIC_BBOX.minLat, NORTH_ATLANTIC_BBOX.minLon],
   [NORTH_ATLANTIC_BBOX.maxLat, NORTH_ATLANTIC_BBOX.maxLon],
+];
+/** Only the Baltic strip south of the North Atlantic box, so no message comes twice */
+const SUBSCRIBE_BALTIC_SOUTH: [[number, number], [number, number]] = [
+  [BALTIC_BBOX.minLat, BALTIC_BBOX.minLon],
+  [NORTH_ATLANTIC_BBOX.minLat, BALTIC_BBOX.maxLon],
 ];
 
 const POSITION_TYPES = new Set([
@@ -117,12 +137,7 @@ function padMmsi(v: unknown): string {
 }
 
 function inNorthAtlantic(lat: number, lon: number): boolean {
-  return (
-    lat >= NORTH_ATLANTIC_BBOX.minLat &&
-    lat <= NORTH_ATLANTIC_BBOX.maxLat &&
-    lon >= NORTH_ATLANTIC_BBOX.minLon &&
-    lon <= NORTH_ATLANTIC_BBOX.maxLon
-  );
+  return inWatchArea(lat, lon);
 }
 
 function ensureVessel(mmsi: string): AisStreamVessel {
@@ -341,12 +356,12 @@ function connect(apiKey: string) {
     reconnectAttempt = 0;
     const subscription = {
       APIKey: apiKey,
-      BoundingBoxes: [SUBSCRIBE_BBOX],
+      BoundingBoxes: [SUBSCRIBE_BBOX, SUBSCRIBE_BALTIC_SOUTH],
       FilterMessageTypes: SUBSCRIBED_TYPES,
     };
     ws.send(JSON.stringify(subscription));
     console.log(
-      `[aisstream] connected — subscribed N Atlantic N of ${NORTH_ATLANTIC_BBOX.minLat}° (${SUBSCRIBE_BBOX[0]} → ${SUBSCRIBE_BBOX[1]})`
+      `[aisstream] connected — subscribed N Atlantic N of ${NORTH_ATLANTIC_BBOX.minLat}° (${SUBSCRIBE_BBOX[0]} → ${SUBSCRIBE_BBOX[1]}) and the Baltic from ${BALTIC_BBOX.minLat}°N`
     );
   });
 
@@ -553,6 +568,7 @@ export function getAisStreamStatus() {
     lastMessageAt: lastMessageAt || null,
     silenceSec: lastMessageAt ? Math.round((Date.now() - lastMessageAt) / 1000) : null,
     bbox: NORTH_ATLANTIC_BBOX,
+    baltic: BALTIC_BBOX,
     worldwide: {
       following: worldwideMmsi.size,
       connected: worldConnected,
