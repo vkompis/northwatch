@@ -94,17 +94,6 @@ export function DotMarker({ color, stroke }: { color: string; stroke?: string })
   );
 }
 
-/** Light to dark red, like HELCOM's density maps */
-export function DensityMarker() {
-  return (
-    <svg width="16" height="10" viewBox="0 0 16 10" aria-hidden="true">
-      <rect x="1" y="2" width="4.5" height="6" fill="#fcd4c8" />
-      <rect x="5.5" y="2" width="4.5" height="6" fill="#ef6a4c" />
-      <rect x="10" y="2" width="5" height="6" fill="#a50f15" />
-    </svg>
-  );
-}
-
 export function LineMarker({ color, dashed = false }: { color: string; dashed?: boolean }) {
   return (
     <svg width="16" height="10" viewBox="0 0 16 10" aria-hidden="true">

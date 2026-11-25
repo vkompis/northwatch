@@ -86,7 +86,7 @@ function copernicusAreaUrl(view: MapView | null): string {
   }
   return `https://browser.dataspace.copernicus.eu/?${params}`;
 }
-import LayerRow, { DensityMarker, DotMarker, LineMarker, RingMarker } from './LayerRow';
+import LayerRow, { DotMarker, LineMarker, RingMarker } from './LayerRow';
 import VesselDossier from './VesselDossier';
 import VesselTimeline from './VesselTimeline';
 
@@ -114,8 +114,6 @@ const DEFAULT_OVERLAYS: OverlayVisibility = {
   ports: false,
   airports: false,
   'ice-edge': false,
-  'traffic-density': false,
-  'tanker-density': false,
   navwarnings: false,
   'navwarnings-30d': false,
 };
@@ -802,9 +800,8 @@ export default function HomePage() {
                 Inside Norway EEZ, Jan Mayen EEZ, and the Svalbard Fisheries Protection Zone: all
                 registered vessels except fishing under 15&nbsp;m and recreational under 45&nbsp;m
                 (when length is known). Elsewhere in the North Atlantic north of 54°N and in the
-                Baltic: Russian
-                vessels, curated research vessels, shadow fleet, sanctioned vessels, and military /
-                law enforcement. Live AIS via AISStream, BarentsWatch and Digitraffic (Finnish coastal
+                Baltic: Russian vessels, curated research vessels, shadow fleet, sanctioned vessels,
+                and military / law enforcement. Live AIS via AISStream, BarentsWatch and Digitraffic (Finnish coastal
                 stations: Gulf of Finland, Gulf of Bothnia). Fishing-gear
                 buoys and other AIS beacons are hidden by default (Ship filters → Ship type).
               </div>
@@ -930,8 +927,6 @@ export default function HomePage() {
         overlays['eez-norway'],
         overlays['eez-janmayen'],
         overlays['ice-edge'],
-        overlays['traffic-density'],
-        overlays['tanker-density'],
       ]),
       title: 'Sea & seabed',
       content: (
@@ -973,20 +968,6 @@ export default function HomePage() {
               marker={<LineMarker color="#7dd3fc" />}
               checked={overlays['ice-edge']}
               onChange={(on) => setOverlay('ice-edge', on)}
-            />
-            <LayerRow
-              label="Baltic ship traffic"
-              sub="HELCOM AIS density · 2024"
-              marker={<DensityMarker />}
-              checked={overlays['traffic-density']}
-              onChange={(on) => setOverlay('traffic-density', on)}
-            />
-            <LayerRow
-              label="Baltic tanker traffic"
-              sub="HELCOM AIS density · 2024"
-              marker={<DensityMarker />}
-              checked={overlays['tanker-density']}
-              onChange={(on) => setOverlay('tanker-density', on)}
             />
             <a
               className="panel-link"
